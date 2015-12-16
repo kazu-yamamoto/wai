@@ -141,7 +141,7 @@ worker ctx@Context{inputQ,outputQ} set app responder tm = do
         setThreadContinue tcont True
         ex <- E.try $ do
             T.pause th
-            Input strm req <- atomically $ readTQueue inputQ
+            Input strm req <- atomically $ readTBQueue inputQ
             setStreamInfo sinfo strm req
             T.resume th
             T.tickle th

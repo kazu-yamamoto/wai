@@ -98,7 +98,7 @@ data Context = Context {
   --   this requirement.
   , continued          :: !(IORef (Maybe StreamId))
   , currentStreamId    :: !(IORef StreamId)
-  , inputQ             :: !(TQueue Input)
+  , inputQ             :: !(TBQueue Input)
   , outputQ            :: !(PriorityTree Output)
   , encodeDynamicTable :: !(IORef DynamicTable)
   , decodeDynamicTable :: !(IORef DynamicTable)
@@ -114,7 +114,7 @@ newContext = Context <$> newIORef defaultSettings
                      <*> newIORef 0
                      <*> newIORef Nothing
                      <*> newIORef 0
-                     <*> newTQueueIO
+                     <*> newTBQueueIO 10 -- fixme: hard coding: 10
                      <*> newPriorityTree
                      <*> (newDynamicTableForEncoding defaultDynamicTableSize >>= newIORef)
                      <*> (newDynamicTableForDecoding defaultDynamicTableSize >>= newIORef)
