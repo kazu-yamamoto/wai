@@ -68,6 +68,7 @@ module Network.Wai.Handler.Warp.Internal (
   , setSocketCloseOnExec
   , windowsThreadBlockHack
     -- * Misc
+  , http1server
   , http2server
   , withII
   , pReadMaker
@@ -79,6 +80,7 @@ import Network.Wai.Handler.Warp.Buffer
 import Network.Wai.Handler.Warp.Date
 import Network.Wai.Handler.Warp.FdCache
 import Network.Wai.Handler.Warp.FileInfoCache
+import Network.Wai.Handler.Warp.HTTP1
 import Network.Wai.Handler.Warp.HTTP2
 import Network.Wai.Handler.Warp.HTTP2.File
 import Network.Wai.Handler.Warp.Header

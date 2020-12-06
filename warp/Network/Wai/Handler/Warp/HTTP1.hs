@@ -6,6 +6,7 @@
 
 module Network.Wai.Handler.Warp.HTTP1 (
     http1
+  , http1server
   ) where
 
 import "iproute" Data.IP (toHostAddress, toHostAddress6)
@@ -33,7 +34,7 @@ http1 settings ii conn transport app origAddr th bs0 = do
     src <- mkSource (wrappedRecv conn istatus (settingsSlowlorisSize settings))
     leftoverSource src bs0
     addr <- getProxyProtocolAddr src
-    http1server settings ii conn transport app addr th istatus src
+    http1server settings ii transport addr app conn th istatus src
   where
     wrappedRecv Connection { connRecv = recv } istatus slowlorisSize = do
         bs <- recv
@@ -82,8 +83,8 @@ http1 settings ii conn transport app origAddr th bs0 = do
 
     decodeAscii = map (chr . fromEnum) . BS.unpack
 
-http1server :: Settings -> InternalInfo -> Connection -> Transport -> Application  -> SockAddr -> T.Handle -> IORef Bool -> Source -> IO ()
-http1server settings ii conn transport app addr th istatus src =
+http1server :: Settings -> InternalInfo -> Transport -> SockAddr -> Application -> Connection -> T.Handle -> IORef Bool -> Source -> IO ()
+http1server settings ii transport addr app conn th istatus src =
     loop True `E.catch` handler
   where
     handler e
