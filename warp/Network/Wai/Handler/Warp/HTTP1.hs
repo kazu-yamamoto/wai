@@ -8,6 +8,7 @@
 module Network.Wai.Handler.Warp.HTTP1 (
     http1
   , http1server
+  , H1Config(..)
   ) where
 
 import "iproute" Data.IP (toHostAddress, toHostAddress6)

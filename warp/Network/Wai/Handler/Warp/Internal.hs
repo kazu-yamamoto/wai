@@ -68,6 +68,7 @@ module Network.Wai.Handler.Warp.Internal (
   , setSocketCloseOnExec
   , windowsThreadBlockHack
     -- * Misc
+  , H1Config(..)
   , http1server
   , http2server
   , withII
