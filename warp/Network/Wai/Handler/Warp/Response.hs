@@ -103,12 +103,12 @@ sendResponse :: Settings
              -> Connection
              -> InternalInfo
              -> T.Handle
+             -> IO ByteString -- ^ source from client, for raw response
              -> Request -- ^ HTTP request.
              -> IndexedHeader -- ^ Indexed header of HTTP request.
-             -> IO ByteString -- ^ source from client, for raw response
              -> Response -- ^ HTTP response including status code and response header.
              -> IO Bool -- ^ Returing True if the connection is persistent.
-sendResponse settings conn ii th req reqidxhdr src response = do
+sendResponse settings conn ii th src req reqidxhdr response = do
     hs <- addAltSvc settings <$> addServerAndDate hs0
     if hasBody s then do
         -- The response to HEAD does not have body.

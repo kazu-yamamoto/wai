@@ -28,13 +28,29 @@ import Network.Wai.Handler.Warp.Response
 import Network.Wai.Handler.Warp.Settings
 import Network.Wai.Handler.Warp.Types
 
+----------------------------------------------------------------
+
 http1 :: Settings -> InternalInfo -> Connection -> Transport -> Application -> SockAddr -> T.Handle -> ByteString -> IO ()
 http1 settings ii conn transport app origAddr th bs0 = do
     istatus <- newIORef True
     src <- mkSource (wrappedRecv conn istatus (settingsSlowlorisSize settings))
-    leftoverSource src bs0
     addr <- getProxyProtocolAddr src
-    http1server settings ii transport addr app conn th istatus src
+    let sendR req idxhdr rsp = do
+            T.resume th
+            -- FIXME consider forcing evaluation of the res here to
+            -- send more meaningful error messages to the user.
+            -- However, it may affect performance.
+            writeIORef istatus False
+            sendResponse settings conn ii th (readSource src) req idxhdr rsp
+        recvR fstreq = do
+            req <- recvRequest settings conn ii th addr src transport fstreq
+            -- Let the application run for as long as it wants
+            T.pause th
+            return req
+        sendE = sendErrorResponse settings conn ii th istatus
+        tailC = tailCheck settings th
+    leftoverSource src bs0
+    http1server settings addr app recvR sendR sendE tailC
   where
     wrappedRecv Connection { connRecv = recv } istatus slowlorisSize = do
         bs <- recv
@@ -83,8 +99,9 @@ http1 settings ii conn transport app origAddr th bs0 = do
 
     decodeAscii = map (chr . fromEnum) . BS.unpack
 
-http1server :: Settings -> InternalInfo -> Transport -> SockAddr -> Application -> Connection -> T.Handle -> IORef Bool -> Source -> IO ()
-http1server settings ii transport addr app conn th istatus src =
+----------------------------------------------------------------
+
+http1server settings addr app recvR sendR sendE tailC =
     loop True `E.catch` handler
   where
     handler e
@@ -94,16 +111,11 @@ http1server settings ii transport addr app conn th istatus src =
       -- No valid request
       | Just (BadFirstLine _)   <- fromException e = return ()
       | otherwise = do
-          _ <- sendErrorResponse settings ii conn th istatus defaultRequest { remoteHost = addr } e
+          _ <- sendE defaultRequest { remoteHost = addr } e
           throwIO e
 
     loop firstRequest = do
-        (req, mremainingRef, idxhdr, nextBodyFlush) <- recvRequest firstRequest settings conn ii th addr src transport
-        keepAlive <- processRequest settings ii conn app th istatus src req mremainingRef idxhdr nextBodyFlush
-            `E.catch` \e -> do
-                settingsOnException settings (Just req) e
-                -- Don't throw the error again to prevent calling settingsOnException twice.
-                return False
+        keepAlive <- processRequest settings app recvR sendR sendE tailC firstRequest
 
         -- When doing a keep-alive connection, the other side may just
         -- close the connection. We don't want to treat that as an
@@ -116,87 +128,77 @@ http1server settings ii transport addr app conn th istatus src =
 
         when keepAlive $ loop False
 
-processRequest :: Settings -> InternalInfo -> Connection -> Application -> T.Handle -> IORef Bool -> Source -> Request -> Maybe (IORef Int) -> IndexedHeader -> IO ByteString -> IO Bool
-processRequest settings ii conn app th istatus src req mremainingRef idxhdr nextBodyFlush = do
-    -- Let the application run for as long as it wants
-    T.pause th
+----------------------------------------------------------------
 
-    -- In the event that some scarce resource was acquired during
-    -- creating the request, we need to make sure that we don't get
-    -- an async exception before calling the ResponseSource.
-    keepAliveRef <- newIORef $ error "keepAliveRef not filled"
-    r <- E.try $ app req $ \res -> do
-        T.resume th
-        -- FIXME consider forcing evaluation of the res here to
-        -- send more meaningful error messages to the user.
-        -- However, it may affect performance.
-        writeIORef istatus False
-        keepAlive <- sendResponse settings conn ii th req idxhdr (readSource src) res
-        writeIORef keepAliveRef keepAlive
-        return ResponseReceived
-    case r of
-        Right ResponseReceived -> return ()
-        Left e@(SomeException _)
-          | Just (ExceptionInsideResponseBody e') <- fromException e -> throwIO e'
-          | otherwise -> do
-                keepAlive <- sendErrorResponse settings ii conn th istatus req e
-                settingsOnException settings (Just req) e
-                writeIORef keepAliveRef keepAlive
+processRequest settings app recvR sendR sendE tailC firstRequest = do
+    (req,mremainingRef,idxhdr,nextBodyFlush) <- recvR firstRequest
 
-    keepAlive <- readIORef keepAliveRef
+    E.handle (handler req) $ do
+        -- In the event that some scarce resource was acquired during
+        -- creating the request, we need to make sure that we don't get
+        -- an async exception before calling the ResponseSource.
+        keepAliveRef <- newIORef $ error "keepAliveRef not filled"
+        r <- E.try $ app req $ \rsp -> do
+            keepAlive <- sendR req idxhdr rsp
+            writeIORef keepAliveRef keepAlive
+            return ResponseReceived
+        case r of
+            Right ResponseReceived -> return ()
+            Left e@(SomeException _)
+              | Just (ExceptionInsideResponseBody e') <- fromException e -> throwIO e'
+              | otherwise -> do
+                    keepAlive <- sendE req e
+                    settingsOnException settings (Just req) e
+                    writeIORef keepAliveRef keepAlive
 
-    -- We just send a Response and it takes a time to
-    -- receive a Request again. If we immediately call recv,
-    -- it is likely to fail and cause the IO manager to do some work.
-    -- It is very costly, so we yield to another Haskell
-    -- thread hoping that the next Request will arrive
-    -- when this Haskell thread will be re-scheduled.
-    -- This improves performance at least when
-    -- the number of cores is small.
-    Conc.yield
+        keepAlive <- readIORef keepAliveRef
 
-    if keepAlive
-      then
-        -- If there is an unknown or large amount of data to still be read
-        -- from the request body, simple drop this connection instead of
-        -- reading it all in to satisfy a keep-alive request.
-        case settingsMaximumBodyFlush settings of
-            Nothing -> do
-                flushEntireBody nextBodyFlush
-                T.resume th
-                return True
-            Just maxToRead -> do
-                let tryKeepAlive = do
-                        -- flush the rest of the request body
-                        isComplete <- flushBody nextBodyFlush maxToRead
-                        if isComplete then do
-                            T.resume th
-                            return True
-                          else
-                            return False
-                case mremainingRef of
-                    Just ref -> do
-                        remaining <- readIORef ref
-                        if remaining <= maxToRead then
-                            tryKeepAlive
-                          else
-                            return False
-                    Nothing -> tryKeepAlive
-      else
-        return False
-
-sendErrorResponse :: Settings -> InternalInfo -> Connection -> T.Handle -> IORef Bool -> Request -> SomeException -> IO Bool
-sendErrorResponse settings ii conn th istatus req e = do
-    status <- readIORef istatus
-    if shouldSendErrorResponse e && status then
-        sendResponse settings conn ii th req defaultIndexRequestHeader (return BS.empty) errorResponse
-      else
-        return False
+        -- We just send a Response and it takes a time to
+        -- receive a Request again. If we immediately call recv,
+        -- it is likely to fail and cause the IO manager to do some work.
+        -- It is very costly, so we yield to another Haskell
+        -- thread hoping that the next Request will arrive
+        -- when this Haskell thread will be re-scheduled.
+        -- This improves performance at least when
+        -- the number of cores is small.
+        Conc.yield
+        tailC nextBodyFlush mremainingRef keepAlive
   where
-    shouldSendErrorResponse se
-      | Just ConnectionClosedByPeer <- fromException se = False
-      | otherwise                                       = True
-    errorResponse = settingsOnExceptionResponse settings e
+    handler req e = do
+        settingsOnException settings (Just req) e
+        -- Don't throw the error again to prevent calling settingsOnException twice.
+        return False
+
+----------------------------------------------------------------
+
+tailCheck :: Settings -> T.Handle -> IO ByteString -> Maybe (IORef Int) -> Bool -> IO Bool
+tailCheck _ _ _ _                                False = return False
+tailCheck settings th nextBodyFlush mremainingRef True = do
+    -- If there is an unknown or large amount of data to still be read
+    -- from the request body, simple drop this connection instead of
+    -- reading it all in to satisfy a keep-alive request.
+    case settingsMaximumBodyFlush settings of
+        Nothing -> do
+            flushEntireBody nextBodyFlush
+            T.resume th
+            return True
+        Just maxToRead -> do
+            let tryKeepAlive = do
+                    -- flush the rest of the request body
+                    isComplete <- flushBody nextBodyFlush maxToRead
+                    if isComplete then do
+                        T.resume th
+                        return True
+                      else
+                        return False
+            case mremainingRef of
+                Just ref -> do
+                    remaining <- readIORef ref
+                    if remaining <= maxToRead then
+                        tryKeepAlive
+                      else
+                        return False
+                Nothing -> tryKeepAlive
 
 flushEntireBody :: IO ByteString -> IO ()
 flushEntireBody src =
@@ -219,3 +221,18 @@ flushBody src = loop
                 | BS.null bs -> return True
                 | toRead' >= 0 -> loop toRead'
                 | otherwise -> return False
+
+----------------------------------------------------------------
+
+sendErrorResponse :: Settings -> Connection -> InternalInfo -> T.Handle -> IORef Bool -> Request -> SomeException -> IO Bool
+sendErrorResponse settings conn ii th istatus req e = do
+    status <- readIORef istatus
+    if shouldSendErrorResponse e && status then
+        sendResponse settings conn ii th (return BS.empty) req defaultIndexRequestHeader errorResponse
+      else
+        return False
+  where
+    shouldSendErrorResponse se
+      | Just ConnectionClosedByPeer <- fromException se = False
+      | otherwise                                       = True
+    errorResponse = settingsOnExceptionResponse settings e

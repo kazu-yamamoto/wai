@@ -44,14 +44,14 @@ import Network.Wai.Handler.Warp.Settings (Settings, settingsNoParsePath, setting
 
 -- | Receiving a HTTP request from 'Connection' and parsing its header
 --   to create 'Request'.
-recvRequest :: Bool -- ^ first request on this connection?
-            -> Settings
+recvRequest :: Settings
             -> Connection
             -> InternalInfo
             -> Timeout.Handle
             -> SockAddr -- ^ Peer's address.
             -> Source -- ^ Where HTTP request comes from.
             -> Transport
+            -> Bool -- ^ first request on this connection?
             -> IO (Request
                   ,Maybe (I.IORef Int)
                   ,IndexedHeader
@@ -61,7 +61,7 @@ recvRequest :: Bool -- ^ first request on this connection?
             -- 'IndexedHeader' of HTTP request for internal use,
             -- Body producing action used for flushing the request body
 
-recvRequest firstRequest settings conn ii th addr src transport = do
+recvRequest settings conn ii th addr src transport firstRequest = do
     hdrlines <- headerLines (settingsMaxTotalHeaderLength settings) firstRequest src
     (method, unparsedPath, path, query, httpversion, hdr) <- parseHeaderLines hdrlines
     let idxhdr = indexRequestHeader hdr
