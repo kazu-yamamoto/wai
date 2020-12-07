@@ -53,8 +53,8 @@ recvRequest :: Settings
             -> Transport
             -> Bool -- ^ first request on this connection?
             -> IO (Request
-                  ,Maybe (I.IORef Int)
                   ,IndexedHeader
+                  ,Maybe (I.IORef Int)
                   ,IO ByteString) -- ^
             -- 'Request' passed to 'Application',
             -- how many bytes remain to be consumed, if known
@@ -97,7 +97,7 @@ recvRequest settings conn ii th addr src transport firstRequest = do
           , requestHeaderReferer   = idxhdr ! fromEnum ReqReferer
           , requestHeaderUserAgent = idxhdr ! fromEnum ReqUserAgent
           }
-    return (req, remainingRef, idxhdr, rbodyFlush)
+    return (req, idxhdr, remainingRef, rbodyFlush)
 
 ----------------------------------------------------------------
 

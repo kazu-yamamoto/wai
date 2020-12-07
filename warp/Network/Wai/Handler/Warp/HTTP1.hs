@@ -107,11 +107,11 @@ http1 settings ii conn transport app origAddr th bs0 = do
 ----------------------------------------------------------------
 
 data H1Config = H1Config {
-    recvReq :: Bool -> IO (Request, Maybe (IORef Int), IndexedHeader, IO ByteString)
+    recvReq :: Bool -> IO (Request, IndexedHeader, Maybe (IORef Int), IO ByteString)
   , sendRsp :: Request -> IndexedHeader -> Response -> IO Bool
 
   , sendErr :: Request -> SomeException -> IO Bool
-  , tailChk :: IO ByteString -> Maybe (IORef Int) -> Bool -> IO Bool
+  , tailChk :: Maybe (IORef Int) -> IO ByteString -> Bool -> IO Bool
   , cliAddr :: SockAddr
   }
 
@@ -149,7 +149,7 @@ http1server settings h1conf@H1Config{..} app =
 
 processRequest :: Settings -> H1Config -> Application -> Bool -> IO Bool
 processRequest settings H1Config{..} app firstRequest = do
-    (req,mremainingRef,idxhdr,nextBodyFlush) <- recvReq firstRequest
+    (req,idxhdr,mremainingRef,nextBodyFlush) <- recvReq firstRequest
 
     E.handle (handler req) $ do
         -- In the event that some scarce resource was acquired during
@@ -180,7 +180,7 @@ processRequest settings H1Config{..} app firstRequest = do
         -- This improves performance at least when
         -- the number of cores is small.
         Conc.yield
-        tailChk nextBodyFlush mremainingRef keepAlive
+        tailChk mremainingRef nextBodyFlush keepAlive
   where
     handler req e = do
         settingsOnException settings (Just req) e
@@ -189,9 +189,9 @@ processRequest settings H1Config{..} app firstRequest = do
 
 ----------------------------------------------------------------
 
-tailCheck :: Settings -> T.Handle -> IO ByteString -> Maybe (IORef Int) -> Bool -> IO Bool
+tailCheck :: Settings -> T.Handle -> Maybe (IORef Int) -> IO ByteString -> Bool -> IO Bool
 tailCheck _ _ _ _                                False = return False
-tailCheck settings th nextBodyFlush mremainingRef True = do
+tailCheck settings th mremainingRef nextBodyFlush True = do
     -- If there is an unknown or large amount of data to still be read
     -- from the request body, simple drop this connection instead of
     -- reading it all in to satisfy a keep-alive request.
