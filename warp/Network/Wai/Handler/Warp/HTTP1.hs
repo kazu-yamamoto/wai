@@ -38,21 +38,21 @@ http1 settings ii conn transport app origAddr th bs0 = do
     src <- mkSource (wrappedRecv conn istatus (settingsSlowlorisSize settings))
     addr <- getProxyProtocolAddr src
     let h1conf = H1Config {
-            sendR = \req idxhdr rsp -> do
+            recvReq = \fstreq -> do
+                req <- recvRequest settings conn ii th addr src transport fstreq
+                -- Let the application run for as long as it wants
+                T.pause th
+                return req
+          , sendRsp = \req idxhdr rsp -> do
                   T.resume th
                   -- FIXME consider forcing evaluation of the res here to
                   -- send more meaningful error messages to the user.
                   -- However, it may affect performance.
                   writeIORef istatus False
                   sendResponse settings conn ii th (readSource src) req idxhdr rsp
-          , recvR = \fstreq -> do
-                req <- recvRequest settings conn ii th addr src transport fstreq
-                -- Let the application run for as long as it wants
-                T.pause th
-                return req
-          , sendE = sendErrorResponse settings conn ii th istatus
-          , tailC = tailCheck settings th
-          , cAddr = addr
+          , sendErr = sendErrorResponse settings conn ii th istatus
+          , tailChk = tailCheck settings th
+          , cliAddr = addr
           }
     leftoverSource src bs0
     http1server settings h1conf app
@@ -107,12 +107,12 @@ http1 settings ii conn transport app origAddr th bs0 = do
 ----------------------------------------------------------------
 
 data H1Config = H1Config {
-    recvR :: Bool -> IO (Request, Maybe (IORef Int), IndexedHeader, IO ByteString)
-  , sendR :: Request -> IndexedHeader -> Response -> IO Bool
+    recvReq :: Bool -> IO (Request, Maybe (IORef Int), IndexedHeader, IO ByteString)
+  , sendRsp :: Request -> IndexedHeader -> Response -> IO Bool
 
-  , sendE :: Request -> SomeException -> IO Bool
-  , tailC :: IO ByteString -> Maybe (IORef Int) -> Bool -> IO Bool
-  , cAddr :: SockAddr
+  , sendErr :: Request -> SomeException -> IO Bool
+  , tailChk :: IO ByteString -> Maybe (IORef Int) -> Bool -> IO Bool
+  , cliAddr :: SockAddr
   }
 
 ----------------------------------------------------------------
@@ -128,7 +128,7 @@ http1server settings h1conf@H1Config{..} app =
       -- No valid request
       | Just (BadFirstLine _)   <- fromException e = return ()
       | otherwise = do
-          _ <- sendE defaultRequest { remoteHost = cAddr } e
+          _ <- sendErr defaultRequest { remoteHost = cliAddr } e
           throwIO e
 
     loop firstRequest = do
@@ -149,7 +149,7 @@ http1server settings h1conf@H1Config{..} app =
 
 processRequest :: Settings -> H1Config -> Application -> Bool -> IO Bool
 processRequest settings H1Config{..} app firstRequest = do
-    (req,mremainingRef,idxhdr,nextBodyFlush) <- recvR firstRequest
+    (req,mremainingRef,idxhdr,nextBodyFlush) <- recvReq firstRequest
 
     E.handle (handler req) $ do
         -- In the event that some scarce resource was acquired during
@@ -157,7 +157,7 @@ processRequest settings H1Config{..} app firstRequest = do
         -- an async exception before calling the ResponseSource.
         keepAliveRef <- newIORef $ error "keepAliveRef not filled"
         r <- E.try $ app req $ \rsp -> do
-            keepAlive <- sendR req idxhdr rsp
+            keepAlive <- sendRsp req idxhdr rsp
             writeIORef keepAliveRef keepAlive
             return ResponseReceived
         case r of
@@ -165,7 +165,7 @@ processRequest settings H1Config{..} app firstRequest = do
             Left e@(SomeException _)
               | Just (ExceptionInsideResponseBody e') <- fromException e -> throwIO e'
               | otherwise -> do
-                    keepAlive <- sendE req e
+                    keepAlive <- sendErr req e
                     settingsOnException settings (Just req) e
                     writeIORef keepAliveRef keepAlive
 
@@ -180,7 +180,7 @@ processRequest settings H1Config{..} app firstRequest = do
         -- This improves performance at least when
         -- the number of cores is small.
         Conc.yield
-        tailC nextBodyFlush mremainingRef keepAlive
+        tailChk nextBodyFlush mremainingRef keepAlive
   where
     handler req e = do
         settingsOnException settings (Just req) e
