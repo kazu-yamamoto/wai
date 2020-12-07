@@ -3,6 +3,7 @@
 {-# LANGUAGE PackageImports #-}
 {-# LANGUAGE PatternGuards #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE RecordWildCards #-}
 
 module Network.Wai.Handler.Warp.HTTP1 (
     http1
@@ -35,22 +36,25 @@ http1 settings ii conn transport app origAddr th bs0 = do
     istatus <- newIORef True
     src <- mkSource (wrappedRecv conn istatus (settingsSlowlorisSize settings))
     addr <- getProxyProtocolAddr src
-    let sendR req idxhdr rsp = do
-            T.resume th
-            -- FIXME consider forcing evaluation of the res here to
-            -- send more meaningful error messages to the user.
-            -- However, it may affect performance.
-            writeIORef istatus False
-            sendResponse settings conn ii th (readSource src) req idxhdr rsp
-        recvR fstreq = do
-            req <- recvRequest settings conn ii th addr src transport fstreq
-            -- Let the application run for as long as it wants
-            T.pause th
-            return req
-        sendE = sendErrorResponse settings conn ii th istatus
-        tailC = tailCheck settings th
+    let h1conf = H1Config {
+            sendR = \req idxhdr rsp -> do
+                  T.resume th
+                  -- FIXME consider forcing evaluation of the res here to
+                  -- send more meaningful error messages to the user.
+                  -- However, it may affect performance.
+                  writeIORef istatus False
+                  sendResponse settings conn ii th (readSource src) req idxhdr rsp
+          , recvR = \fstreq -> do
+                req <- recvRequest settings conn ii th addr src transport fstreq
+                -- Let the application run for as long as it wants
+                T.pause th
+                return req
+          , sendE = sendErrorResponse settings conn ii th istatus
+          , tailC = tailCheck settings th
+          , cAddr = addr
+          }
     leftoverSource src bs0
-    http1server settings addr app recvR sendR sendE tailC
+    http1server settings h1conf app
   where
     wrappedRecv Connection { connRecv = recv } istatus slowlorisSize = do
         bs <- recv
@@ -101,7 +105,19 @@ http1 settings ii conn transport app origAddr th bs0 = do
 
 ----------------------------------------------------------------
 
-http1server settings addr app recvR sendR sendE tailC =
+data H1Config = H1Config {
+    recvR :: Bool -> IO (Request, Maybe (IORef Int), IndexedHeader, IO ByteString)
+  , sendR :: Request -> IndexedHeader -> Response -> IO Bool
+
+  , sendE :: Request -> SomeException -> IO Bool
+  , tailC :: IO ByteString -> Maybe (IORef Int) -> Bool -> IO Bool
+  , cAddr :: SockAddr
+  }
+
+----------------------------------------------------------------
+
+http1server :: Settings -> H1Config -> Application -> IO ()
+http1server settings h1conf@H1Config{..} app =
     loop True `E.catch` handler
   where
     handler e
@@ -111,11 +127,11 @@ http1server settings addr app recvR sendR sendE tailC =
       -- No valid request
       | Just (BadFirstLine _)   <- fromException e = return ()
       | otherwise = do
-          _ <- sendE defaultRequest { remoteHost = addr } e
+          _ <- sendE defaultRequest { remoteHost = cAddr } e
           throwIO e
 
     loop firstRequest = do
-        keepAlive <- processRequest settings app recvR sendR sendE tailC firstRequest
+        keepAlive <- processRequest settings h1conf app firstRequest
 
         -- When doing a keep-alive connection, the other side may just
         -- close the connection. We don't want to treat that as an
@@ -130,7 +146,8 @@ http1server settings addr app recvR sendR sendE tailC =
 
 ----------------------------------------------------------------
 
-processRequest settings app recvR sendR sendE tailC firstRequest = do
+processRequest :: Settings -> H1Config -> Application -> Bool -> IO Bool
+processRequest settings H1Config{..} app firstRequest = do
     (req,mremainingRef,idxhdr,nextBodyFlush) <- recvR firstRequest
 
     E.handle (handler req) $ do
