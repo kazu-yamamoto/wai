@@ -54,11 +54,11 @@ recvRequest :: Settings
             -> Bool -- ^ first request on this connection?
             -> IO (Request
                   ,IndexedHeader
-                  ,Maybe (I.IORef Int)
-                  ,IO ByteString) -- ^
+                  ,(Maybe (I.IORef Int)
+                   ,IO ByteString)) -- ^
             -- 'Request' passed to 'Application',
-            -- how many bytes remain to be consumed, if known
             -- 'IndexedHeader' of HTTP request for internal use,
+            -- how many bytes remain to be consumed if known,
             -- Body producing action used for flushing the request body
 
 recvRequest settings conn ii th addr src transport firstRequest = do
@@ -97,7 +97,7 @@ recvRequest settings conn ii th addr src transport firstRequest = do
           , requestHeaderReferer   = idxhdr ! fromEnum ReqReferer
           , requestHeaderUserAgent = idxhdr ! fromEnum ReqUserAgent
           }
-    return (req, idxhdr, remainingRef, rbodyFlush)
+    return (req, idxhdr, (remainingRef, rbodyFlush))
 
 ----------------------------------------------------------------
 
