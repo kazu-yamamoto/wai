@@ -20,6 +20,7 @@ module Control.Reaper (
     , defaultReaperSettings
       -- * Accessors
     , reaperAction
+    , reaperAction2
     , reaperDelay
     , reaperCons
     , reaperNull
@@ -58,6 +59,7 @@ data ReaperSettings workload item = ReaperSettings
     -- definitely override this default.
     --
     -- @since 0.1.1
+    , reaperAction2 :: Maybe (IO (workload -> workload))
     , reaperDelay :: {-# UNPACK #-} !Int
     -- ^ Number of microseconds to delay between calls of 'reaperAction'.
     --
@@ -91,11 +93,12 @@ data ReaperSettings workload item = ReaperSettings
 -- @since 0.1.1
 defaultReaperSettings :: ReaperSettings [item] item
 defaultReaperSettings = ReaperSettings
-    { reaperAction = \wl -> return (wl ++)
-    , reaperDelay = 30000000
-    , reaperCons = (:)
-    , reaperNull = null
-    , reaperEmpty = []
+    { reaperAction  = \wl -> return (wl ++)
+    , reaperAction2 = Nothing
+    , reaperDelay   = 30000000
+    , reaperCons    = (:)
+    , reaperNull    = null
+    , reaperEmpty   = []
     }
 
 -- | A data structure to hold reaper APIs.
@@ -171,15 +174,21 @@ reaper :: ReaperSettings workload item
        -> IO ()
 reaper settings@ReaperSettings{..} stateRef tidRef = do
     threadDelay reaperDelay
-    -- Getting the current jobs. Push an empty job to the reference.
-    wl <- atomicModifyIORef' stateRef swapWithEmpty
-    -- Do the jobs. A function to merge the left jobs and
-    -- new jobs is returned.
-    !merge <- reaperAction wl
-    -- Merging the left jobs and new jobs.
-    -- If there is no jobs, this thread finishes.
-    next <- atomicModifyIORef' stateRef (check merge)
-    next
+    case reaperAction2 of
+      Nothing -> do
+          -- Getting the current jobs. Push an empty job to the reference.
+          wl <- atomicModifyIORef' stateRef swapWithEmpty
+          -- Do the jobs. A function to merge the left jobs and
+          -- new jobs is returned.
+          !merge <- reaperAction wl
+          -- Merging the left jobs and new jobs.
+          -- If there is no jobs, this thread finishes.
+          next <- atomicModifyIORef' stateRef (check merge)
+          next
+      Just mkPrune -> do
+          prune <- mkPrune
+          next <- atomicModifyIORef' stateRef (check2 prune)
+          next
   where
     swapWithEmpty NoReaper      = error "Control.Reaper.reaper: unexpected NoReaper (1)"
     swapWithEmpty (Workload wl) = (Workload reaperEmpty, wl)
@@ -192,6 +201,15 @@ reaper settings@ReaperSettings{..} stateRef tidRef = do
       | otherwise      = (Workload wl', reaper settings stateRef tidRef)
       where
         wl' = merge wl
+
+    check2 _ NoReaper   = error "Control.Reaper.reaper: unexpected NoReaper (3)"
+    check2 prune (Workload wl)
+      -- If there is no job, reaper is terminated.
+      | reaperNull wl' = (NoReaper, writeIORef tidRef Nothing)
+      -- If there are jobs, carry them out.
+      | otherwise      = (Workload wl', reaper settings stateRef tidRef)
+      where
+        wl' = prune wl
 
 -- | A helper function for creating 'reaperAction' functions. You would
 -- provide this function with a function to process a single work item and
