@@ -61,7 +61,7 @@ main = do
             ]
         ]
   where
-    testIt req = producer req >>= headerLines 800 False
+    testIt req = producer req >>= headerLines 800 FirstRequest
 
 ----------------------------------------------------------------
 
