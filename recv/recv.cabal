@@ -17,9 +17,14 @@ Library
                    , bytestring                >= 0.9.1.4
                    , network                   >= 3.1.0
   Exposed-modules:   Network.Socket.BufferPool
+                     Network.Socket.Recv
   Other-modules:     Network.Socket.BufferPool.Buffer
                      Network.Socket.BufferPool.Recv
                      Network.Socket.BufferPool.Types
+                     Network.Socket.Recv.Blocking
+                     Network.Socket.Recv.NonBlocking
+                     Network.Socket.Recv.Types
+
   if impl(ghc >= 8)
       Default-Extensions:  Strict StrictData
   Ghc-Options:       -Wall

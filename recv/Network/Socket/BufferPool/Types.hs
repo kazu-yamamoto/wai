@@ -21,9 +21,3 @@ data BufferPool = BufferPool
     , maxBufSize :: Int
     , poolBuffer :: IORef ByteString
     }
-
--- | Type for the receiving function with a buffer pool.
-type Recv = IO ByteString
-
--- | Type for the receiving function which receives N bytes.
-type RecvN = Int -> IO ByteString

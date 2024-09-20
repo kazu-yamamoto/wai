@@ -24,23 +24,24 @@ module Network.Socket.BufferPool (
     -- * Recv
     Recv,
     receive,
+
+    -- * Buffer pool
     BufferPool,
     newBufferPool,
     withBufferPool,
-
-    -- * RecvN
-    RecvN,
-    makeRecvN,
-
-    -- * Types
     Buffer,
     BufSize,
 
     -- * Utilities
     mallocBS,
     copy,
+
+    -- * Historical exportings
+    RecvN,
+    makeRecvN,
 ) where
 
 import Network.Socket.BufferPool.Buffer
 import Network.Socket.BufferPool.Recv
 import Network.Socket.BufferPool.Types
+import Network.Socket.Recv.Blocking
