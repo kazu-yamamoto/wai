@@ -12,14 +12,10 @@ type RecvMany = IO (Int, [ByteString])
 
 type RecvManyN = Int -> IO (Int, [ByteString])
 
-data NBRecvR = EOF ByteString | NotEnough | NBytes ByteString
+data NBRecvR a = EOF a | NotEnough | NBytes a a
 
-type NBRecv = IO NBRecvR
+type NBRecv = IO (NBRecvR ByteString)
 
-type NBRecvN = Int -> IO NBRecvR
+type NBRecvN = Int -> IO (NBRecvR ByteString)
 
-data NBRecvManyR = EOFM [ByteString] | NotEnoughM | NBytesM [ByteString]
-
-type NBRecvMany = IO NBRecvManyR
-
-type NBRecvManyN = Int -> IO NBRecvManyR
+type NBRecvManyN = Int -> IO (NBRecvR (Int, [ByteString]))
