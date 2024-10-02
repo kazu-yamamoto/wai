@@ -33,16 +33,14 @@ Library
 Test-Suite spec
   Main-Is:           Spec.hs
   Other-modules:     BufferPoolSpec
-                     Network.Socket.BufferPool
-                     Network.Socket.BufferPool.Buffer
-                     Network.Socket.BufferPool.Recv
-                     Network.Socket.BufferPool.Types
-  Hs-Source-Dirs:    test, .
+                     RecvSpec
+  Hs-Source-Dirs:    test
   Type:              exitcode-stdio-1.0
   Build-Depends:     base                      >= 4.12       && < 5
                    , bytestring                >= 0.9.1.4
                    , network                   >= 3.1.0
                    , hspec
+                   , recv
   Ghc-Options:       -Wall
   Default-Language:  Haskell2010
   Build-Tool-Depends: hspec-discover:hspec-discover

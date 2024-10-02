@@ -51,6 +51,7 @@ nbRecvNRecvN rcv ref n = do
                             return NotEnough
 
 makeNBRecvManyN :: Recv -> ByteString -> IO NBRecvManyN
+makeNBRecvManyN rcv "" = nbRecvManyN rcv <$> newIORef (0, id)
 makeNBRecvManyN rcv bs0 = nbRecvManyN rcv <$> newIORef (len, (bs0 :))
   where
     len = BS.length bs0
@@ -81,10 +82,8 @@ nbRecvManyN rcv ref n = do
                     if
                         | len2 == n -> return $ NBytes (n, build0 [bs1]) (0, [])
                         | len2 > n -> do
-                            -- slow path
-                            let bsx = BS.concat $ build0 [bs1]
-                                (ret, left) = BS.splitAt n bsx
-                            return $ NBytes (n, [ret]) (len2 - n, [left])
+                            let (bs3, left) = BS.splitAt (n - len0) bs1
+                            return $ NBytes (n, build0 [bs3]) (len2 - n, [left])
                         | otherwise -> do
                             writeIORef ref (len2, build0 . (bs1 :))
                             return NotEnough
