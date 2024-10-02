@@ -6,10 +6,6 @@ module Network.Socket.Recv.NonBlocking (
     NBRecvN,
     NBRecvR (..),
     makeNBRecvN,
-
-    -- * Non-blocking RecvMany
-    NBRecvManyN,
-    makeNBRecvManyN,
 )
 where
 
@@ -19,83 +15,69 @@ import Data.IORef
 
 import Network.Socket.Recv.Types
 
-makeNBRecvN :: Recv -> IO NBRecvN
-makeNBRecvN rcv = nbRecvNRecvN rcv <$> newIORef ""
+data State = E | S ByteString | M ([ByteString] -> [ByteString])
 
-nbRecvNRecvN :: Recv -> IORef ByteString -> NBRecvN
-nbRecvNRecvN _ _ 0 = return $ EOF ""
-nbRecvNRecvN rcv ref n = do
-    bs0 <- readIORef ref
-    let len0 = BS.length bs0
-    if
-        | len0 == n -> do
-            writeIORef ref ""
-            return $ NBytes bs0
-        | len0 > n -> do
-            let (ret, left) = BS.splitAt n bs0
-            writeIORef ref left
-            return $ NBytes ret
-        | otherwise -> do
-            bs1 <- rcv
-            if BS.null bs1
-                then do
-                    writeIORef ref ""
-                    return $ EOF bs0
-                else do
-                    let len1 = BS.length bs1
-                        bs2 = bs0 `BS.append` bs1
-                        len2 = len0 + len1
-                    if
-                        | len2 == n -> do
-                            writeIORef ref ""
-                            return $ NBytes bs2
-                        | len2 > n -> do
-                            let (ret, left) = BS.splitAt n bs2
-                            writeIORef ref left
-                            return $ NBytes ret
-                        | otherwise -> do
-                            writeIORef ref bs2
-                            return NotEnough
-
-makeNBRecvManyN :: Recv -> ByteString -> IO NBRecvManyN
-makeNBRecvManyN rcv "" = nbRecvManyN rcv <$> newIORef (0, id)
-makeNBRecvManyN rcv bs0 = nbRecvManyN rcv <$> newIORef (len, (bs0 :))
+makeNBRecvN :: Recv -> ByteString -> IO NBRecvN
+makeNBRecvN rcv "" = nbRecvN rcv <$> newIORef (0, E)
+makeNBRecvN rcv bs0 = nbRecvN rcv <$> newIORef (len, S bs0)
   where
     len = BS.length bs0
 
-nbRecvManyN
+nbRecvN
     :: Recv
-    -> IORef (Int, [ByteString] -> [ByteString])
-    -> NBRecvManyN
-nbRecvManyN rcv ref n = do
-    (len0, build0) <- readIORef ref
+    -> IORef (Int, State)
+    -> NBRecvN
+nbRecvN rcv ref n = do
+    (len0, st) <- readIORef ref
     if
         | len0 == n -> do
-            writeIORef ref (0, id)
-            return $ NBytes $ build0 []
+            writeIORef ref (0, E)
+            case st of
+                E -> return $ NBytes []
+                S bs0 -> return $ NBytes [bs0]
+                M build0 -> return $ NBytes $ build0 []
         | len0 > n -> do
-            -- slow path
-            let bsx = BS.concat $ build0 []
-                (ret, left) = BS.splitAt n bsx
-            writeIORef ref (len0 - n, (left :))
-            return $ NBytes [ret]
+            case st of
+                E -> error "nbRecvN E"
+                S bs0 -> do
+                    let (ret, left) = BS.splitAt n bs0
+                    writeIORef ref (BS.length left, S left)
+                    return $ NBytes [ret]
+                M build0 -> do
+                    -- slow path
+                    let bs = BS.concat $ build0 []
+                        (ret, left) = BS.splitAt n bs
+                    writeIORef ref (BS.length left, S left)
+                    return $ NBytes [ret]
         | otherwise -> do
             bs1 <- rcv
             if BS.null bs1
                 then do
-                    writeIORef ref (0, id)
-                    return $ EOF $ build0 []
+                    writeIORef ref (0, E)
+                    case st of
+                        E -> return $ EOF []
+                        S bs -> return $ EOF [bs]
+                        M build -> return $ EOF $ build []
                 else do
                     let len1 = BS.length bs1
                         len2 = len0 + len1
                     if
                         | len2 == n -> do
-                            writeIORef ref (0, id)
-                            return $ NBytes $ build0 [bs1]
+                            writeIORef ref (0, E)
+                            case st of
+                                E -> return $ NBytes [bs1]
+                                S bs0 -> return $ NBytes [bs0, bs1]
+                                M build0 -> return $ NBytes $ build0 [bs1]
                         | len2 > n -> do
                             let (bs3, left) = BS.splitAt (n - len0) bs1
-                            writeIORef ref (len2 - n, (left :))
-                            return $ NBytes $ build0 [bs3]
+                            writeIORef ref (BS.length left, S left)
+                            case st of
+                                E -> return $ NBytes [bs3]
+                                S bs0 -> return $ NBytes [bs0, bs3]
+                                M build0 -> return $ NBytes $ build0 [bs3]
                         | otherwise -> do
-                            writeIORef ref (len2, build0 . (bs1 :))
+                            case st of
+                                E -> writeIORef ref (len2, S bs1)
+                                S bs0 -> writeIORef ref (len2, M ((bs0 :) . (bs1 :)))
+                                M build0 -> writeIORef ref (len2, M (build0 . (bs1 :)))
                             return NotEnough

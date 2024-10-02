@@ -19,45 +19,23 @@ spec = do
             testRecvN ["abcdefgh"] 5 "abcde"
             testRecvN ["ab", "cdefgh"] 5 "abcde"
             testRecvN ["a", "b", "c", "d", "e", "f", "g", "h"] 5 "abcde"
+
     describe "NBRecvN" $ do
         it "should work well" $ do
-            testNBRecvN [] 5 [EOF "", EOF "", EOF ""]
-            testNBRecvN ["abcde"] 5 [NBytes "abcde", EOF ""]
-            testNBRecvN ["abcdefgh"] 5 [NBytes "abcde", EOF "fgh", EOF ""]
+            testNBRecvN "" [] 5 [EOF [], EOF [], EOF []]
+            testNBRecvN "" ["abcde"] 5 [NBytes ["abcde"], EOF []]
             testNBRecvN
-                ["ab", "cdefgh"]
-                5
-                [NotEnough, NBytes "abcde", EOF "fgh", EOF ""]
-            testNBRecvN
-                ["a", "b", "c", "d", "e", "f", "g", "h"]
-                5
-                [ NotEnough
-                , NotEnough
-                , NotEnough
-                , NotEnough
-                , NBytes "abcde"
-                , NotEnough
-                , NotEnough
-                , NotEnough
-                , EOF "fgh"
-                , EOF ""
-                ]
-    describe "NBRecvManyN" $ do
-        it "should work well" $ do
-            testNBRecvManyN "" [] 5 [EOF [], EOF [], EOF []]
-            testNBRecvManyN "" ["abcde"] 5 [NBytes ["abcde"], EOF []]
-            testNBRecvManyN
                 ""
                 ["abcdefgh"]
                 5
                 [NBytes ["abcde"], EOF ["fgh"], EOF []]
 
-            testNBRecvManyN
+            testNBRecvN
                 ""
                 ["ab", "cdefgh"]
                 5
                 [NotEnough, NBytes ["ab", "cde"], EOF ["fgh"], EOF []]
-            testNBRecvManyN
+            testNBRecvN
                 ""
                 ["a", "b", "c", "d", "e", "f", "g", "h"]
                 5
@@ -73,24 +51,47 @@ spec = do
                 , EOF []
                 ]
 
+            testNBRecvN "xyz" [] 2 [NBytes ["xy"], EOF ["z"], EOF [], EOF []]
+            testNBRecvN "xyz" [] 5 [EOF ["xyz"], EOF [], EOF []]
+            testNBRecvN "xyz" ["ab"] 5 [NBytes ["xyz", "ab"], EOF [], EOF []]
+            testNBRecvN
+                "xyz"
+                ["abcdefgh"]
+                5
+                [NBytes ["xyz", "ab"], NBytes ["cdefg"], EOF ["h"], EOF []]
+
+            testNBRecvN
+                "xyz"
+                ["ab", "cdefgh"]
+                5
+                [NBytes ["xyz", "ab"], NBytes ["cdefg"], EOF ["h"], EOF []]
+            testNBRecvN
+                "xyz"
+                ["a", "b", "c", "d", "e", "f", "g", "h"]
+                5
+                [ NotEnough
+                , NBytes ["xyz", "a", "b"]
+                , NotEnough
+                , NotEnough
+                , NotEnough
+                , NotEnough
+                , NBytes ["c", "d", "e", "f", "g"]
+                , NotEnough
+                , EOF ["h"]
+                ]
+
 testRecvN :: [ByteString] -> Int -> ByteString -> IO ()
 testRecvN xs n res = do
     rcv <- makeRecv xs
     recvN <- makeRecvN "" rcv
     recvN n `shouldReturn` res
 
-testNBRecvN :: [ByteString] -> Int -> [NBRecvR ByteString] -> IO ()
-testNBRecvN xs n ress = do
+testNBRecvN
+    :: ByteString -> [ByteString] -> Int -> [NBRecvR] -> IO ()
+testNBRecvN ini xs n ress = do
     rcv <- makeRecv xs
-    nbRecvN <- makeNBRecvN rcv
+    nbRecvN <- makeNBRecvN rcv ini
     mapM_ (nbRecvN n `shouldReturn`) ress
-
-testNBRecvManyN
-    :: ByteString -> [ByteString] -> Int -> [NBRecvR [ByteString]] -> IO ()
-testNBRecvManyN ini xs n ress = do
-    rcv <- makeRecv xs
-    nbRecvManyN <- makeNBRecvManyN rcv ini
-    mapM_ (nbRecvManyN n `shouldReturn`) ress
 
 makeRecv :: [ByteString] -> IO Recv
 makeRecv xs0 = do

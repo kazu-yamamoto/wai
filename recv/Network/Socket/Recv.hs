@@ -20,10 +20,6 @@ module Network.Socket.Recv (
     NBRecvN,
     NBRecvR (..),
     makeNBRecvN,
-
-    -- * Non-blocking RecvMany
-    NBRecvManyN,
-    makeNBRecvManyN,
 )
 where
 
