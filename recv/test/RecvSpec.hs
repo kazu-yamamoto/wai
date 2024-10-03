@@ -22,19 +22,19 @@ spec = do
 
     describe "NBRecvN" $ do
         it "should work well" $ do
-            testNBRecvN "" [] 5 [EOF [], EOF [], EOF []]
-            testNBRecvN "" ["abcde"] 5 [NBytes ["abcde"], EOF []]
+            testNBRecvN "" [] 5 [EOF "", EOF "", EOF ""]
+            testNBRecvN "" ["abcde"] 5 [NBytes "abcde", EOF ""]
             testNBRecvN
                 ""
                 ["abcdefgh"]
                 5
-                [NBytes ["abcde"], EOF ["fgh"], EOF []]
+                [NBytes "abcde", EOF "fgh", EOF ""]
 
             testNBRecvN
                 ""
                 ["ab", "cdefgh"]
                 5
-                [NotEnough, NBytes ["ab", "cde"], EOF ["fgh"], EOF []]
+                [NotEnough, NBytes "abcde", EOF "fgh", EOF ""]
             testNBRecvN
                 ""
                 ["a", "b", "c", "d", "e", "f", "g", "h"]
@@ -43,41 +43,42 @@ spec = do
                 , NotEnough
                 , NotEnough
                 , NotEnough
-                , NBytes ["a", "b", "c", "d", "e"]
+                , NBytes "abcde"
                 , NotEnough
                 , NotEnough
                 , NotEnough
-                , EOF ["f", "g", "h"]
-                , EOF []
+                , EOF "fgh"
+                , EOF ""
                 ]
 
-            testNBRecvN "xyz" [] 2 [NBytes ["xy"], EOF ["z"], EOF [], EOF []]
-            testNBRecvN "xyz" [] 5 [EOF ["xyz"], EOF [], EOF []]
-            testNBRecvN "xyz" ["ab"] 5 [NBytes ["xyz", "ab"], EOF [], EOF []]
+            testNBRecvN "xyz" [] 2 [NBytes "xy", EOF "z", EOF "", EOF ""]
+            testNBRecvN "xyz" [] 5 [EOF "xyz", EOF "", EOF ""]
+            testNBRecvN "xyz" ["ab"] 5 [NBytes "xyzab", EOF "", EOF ""]
             testNBRecvN
                 "xyz"
                 ["abcdefgh"]
                 5
-                [NBytes ["xyz", "ab"], NBytes ["cdefg"], EOF ["h"], EOF []]
+                [NBytes "xyzab", NBytes "cdefg", EOF "h", EOF ""]
 
             testNBRecvN
                 "xyz"
                 ["ab", "cdefgh"]
                 5
-                [NBytes ["xyz", "ab"], NBytes ["cdefg"], EOF ["h"], EOF []]
+                [NBytes "xyzab", NBytes "cdefg", EOF "h", EOF ""]
             testNBRecvN
                 "xyz"
                 ["a", "b", "c", "d", "e", "f", "g", "h"]
                 5
                 [ NotEnough
-                , NBytes ["xyz", "a", "b"]
+                , NBytes "xyzab"
                 , NotEnough
                 , NotEnough
                 , NotEnough
                 , NotEnough
-                , NBytes ["c", "d", "e", "f", "g"]
+                , NBytes "cdefg"
                 , NotEnough
-                , EOF ["h"]
+                , EOF "h"
+                , EOF ""
                 ]
 
 testRecvN :: [ByteString] -> Int -> ByteString -> IO ()

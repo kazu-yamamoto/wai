@@ -33,31 +33,31 @@ nbRecvN rcv ref n = do
         | len0 == n -> do
             writeIORef ref (0, E)
             case st of
-                E -> return $ NBytes []
-                S bs0 -> return $ NBytes [bs0]
-                M build0 -> return $ NBytes $ build0 []
+                E -> return $ NBytes ""
+                S bs0 -> return $ NBytes bs0
+                M build0 -> return $ NBytes $ BS.concat $ build0 []
         | len0 > n -> do
             case st of
                 E -> error "nbRecvN E"
                 S bs0 -> do
                     let (ret, left) = BS.splitAt n bs0
                     writeIORef ref (BS.length left, S left)
-                    return $ NBytes [ret]
+                    return $ NBytes ret
                 M build0 -> do
                     -- slow path
                     let bs = BS.concat $ build0 []
                         (ret, left) = BS.splitAt n bs
                     writeIORef ref (BS.length left, S left)
-                    return $ NBytes [ret]
+                    return $ NBytes ret
         | otherwise -> do
             bs1 <- rcv
             if BS.null bs1
                 then do
                     writeIORef ref (0, E)
                     case st of
-                        E -> return $ EOF []
-                        S bs -> return $ EOF [bs]
-                        M build -> return $ EOF $ build []
+                        E -> return $ EOF ""
+                        S bs -> return $ EOF bs
+                        M build -> return $ EOF $ BS.concat $ build []
                 else do
                     let len1 = BS.length bs1
                         len2 = len0 + len1
@@ -65,16 +65,16 @@ nbRecvN rcv ref n = do
                         | len2 == n -> do
                             writeIORef ref (0, E)
                             case st of
-                                E -> return $ NBytes [bs1]
-                                S bs0 -> return $ NBytes [bs0, bs1]
-                                M build0 -> return $ NBytes $ build0 [bs1]
+                                E -> return $ NBytes bs1
+                                S bs0 -> return $ NBytes (bs0 <> bs1)
+                                M build0 -> return $ NBytes $ BS.concat $ build0 [bs1]
                         | len2 > n -> do
                             let (bs3, left) = BS.splitAt (n - len0) bs1
                             writeIORef ref (BS.length left, S left)
                             case st of
-                                E -> return $ NBytes [bs3]
-                                S bs0 -> return $ NBytes [bs0, bs3]
-                                M build0 -> return $ NBytes $ build0 [bs3]
+                                E -> return $ NBytes bs3
+                                S bs0 -> return $ NBytes (bs0 <> bs3)
+                                M build0 -> return $ NBytes $ BS.concat $ build0 [bs3]
                         | otherwise -> do
                             case st of
                                 E -> writeIORef ref (len2, S bs1)

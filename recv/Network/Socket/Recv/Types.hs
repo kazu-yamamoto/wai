@@ -12,7 +12,7 @@ type RecvMany = IO (Int, [ByteString])
 
 type RecvManyN = Int -> IO (Int, [ByteString])
 
-data NBRecvR = EOF [ByteString] | NotEnough | NBytes [ByteString]
+data NBRecvR = EOF ByteString | NotEnough | NBytes ByteString
     deriving (Eq, Show)
 
 type NBRecvN = Int -> IO NBRecvR
