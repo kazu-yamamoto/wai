@@ -14,6 +14,7 @@ import qualified Data.ByteString as S
 import Data.IORef (newIORef, readIORef)
 import Data.Streaming.Network (bindPortTCP)
 import Foreign.C.Error (Errno (..), eCONNABORTED, eMFILE)
+import GHC.Conc.Sync (labelThread, myThreadId)
 import GHC.IO.Exception (IOErrorType (..), IOException (..))
 import Network.Socket (
     SockAddr,
@@ -383,6 +384,8 @@ serveConnection
     -> IO ()
 serveConnection conn ii th origAddr transport settings app = do
     -- fixme: Upgrading to HTTP/2 should be supported.
+    tid <- myThreadId
+    labelThread tid ("Warp HTTP/1.1 " ++ show origAddr)
     (h2, bs) <-
         if isHTTP2 transport
             then return (True, "")
