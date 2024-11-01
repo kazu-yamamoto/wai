@@ -90,7 +90,7 @@ http2server
     -> H2.Server
 http2server label settings ii transport addr app h2req0 aux0 response = do
     tid <- myThreadId
-    labelThread tid (label ++ " " ++ show addr)
+    labelThread tid (label ++ " http2server " ++ show addr)
     req <- toWAIRequest h2req0 aux0
     ref <- I.newIORef Nothing
     eResponseReceived <- E.try $ app req $ \rsp -> do

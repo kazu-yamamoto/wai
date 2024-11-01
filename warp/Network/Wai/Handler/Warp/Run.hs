@@ -325,7 +325,9 @@ fork
     -> Counter
     -> InternalInfo
     -> IO ()
-fork set mkConn addr app counter ii = settingsFork set $ \unmask ->
+fork set mkConn addr app counter ii = settingsFork set $ \unmask -> do
+    tid <- myThreadId
+    labelThread tid "Warp just forked"
     -- Call the user-supplied on exception code if any
     -- exceptions are thrown.
     --
@@ -385,7 +387,6 @@ serveConnection
 serveConnection conn ii th origAddr transport settings app = do
     -- fixme: Upgrading to HTTP/2 should be supported.
     tid <- myThreadId
-    labelThread tid ("Warp HTTP/1.1 " ++ show origAddr)
     (h2, bs) <-
         if isHTTP2 transport
             then return (True, "")
@@ -396,8 +397,10 @@ serveConnection conn ii th origAddr transport settings app = do
                     else return (False, bs0)
     if settingsHTTP2Enabled settings && h2
         then do
+            labelThread tid ("Warp HTTP/2 " ++ show origAddr)
             http2 settings ii conn transport app origAddr th bs
         else do
+            labelThread tid ("Warp HTTP/1.1 " ++ show origAddr)
             http1 settings ii conn transport app origAddr th bs
   where
     recv4 bs0 = do
