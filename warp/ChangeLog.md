@@ -2,6 +2,9 @@
 
 ## 3.5.0
 
+* The listening socket is closed with `close(2)` rather than with
+  network's `close`, which goes through the IO manager to tell a waiter
+  that, by then, is not there.  Requires network 3.2.11.
 * The accept loop and the graceful shutdown's receive are given up on
   rather than interrupted.  `Listener` accepts through network's
   `withReadable`, and the receive is one `receiveWith`, so neither
