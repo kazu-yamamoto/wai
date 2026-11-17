@@ -51,8 +51,11 @@ import System.ThreadManager (
     newThreadManager,
     reserveManaged,
     stopAfter,
+    stopAfterWithGrace,
     takeReservation,
+    waitStoppingSTM,
     waitUntilAllGone,
+    waitUntilAllGoneFor,
  )
 import System.TimeManager
 import System.TimeManager.Internal
@@ -95,6 +98,44 @@ main = hspec $ do
 
         itLetsTheExceptionOutOf "forkManagedUnmaskFinally" $
             \tm label io -> forkManagedUnmaskFinally tm label (\unmask -> unmask io)
+
+    describe "ThreadManager, stopped with a grace" $ do
+        it "lets a thread waiting for the stop end by itself" $ do
+            tm <- newThreadManager
+            ended <- newEmptyMVar
+            forkManaged tm "probe" $
+                (atomically (waitStoppingSTM tm) >> putMVar ended "itself")
+                    `E.catch` \(E.SomeException e) -> putMVar ended (show e)
+            threadDelay 50_000
+            stopAfterWithGrace tm 1_000_000 (return ()) $ \_ -> return ()
+            takeMVar ended `shouldReturn` "itself"
+            atomically (countManaged tm) `shouldReturn` 0
+
+        it "kills a thread which does not end within the grace" $ do
+            tm <- newThreadManager
+            forkManaged tm "probe" $ threadDelay 10_000_000
+            threadDelay 50_000
+            t0 <- getMonotonicTimeNSec
+            stopAfterWithGrace tm 200_000 (return ()) $ \_ -> return ()
+            t1 <- getMonotonicTimeNSec
+            (t1 - t0) `shouldSatisfy` (>= 150_000_000)
+            waitUntilAllGoneFor tm 1_000_000 `shouldReturn` True
+
+        it "runs the cleanup and rethrows when the action throws" $ do
+            tm <- newThreadManager
+            cleaned <- newEmptyMVar
+            r <-
+                E.try $
+                    stopAfterWithGrace tm 100_000 (throwIO $ userError "action") $
+                        putMVar cleaned . fmap show
+            either (\(E.SomeException _) -> True) (const False) r `shouldBe` True
+            takeMVar cleaned `shouldReturn` Just (show $ userError "action")
+
+        it "says when the threads are not gone in time" $ do
+            tm <- newThreadManager
+            forkManaged tm "probe" $ threadDelay 10_000_000
+            waitUntilAllGoneFor tm 100_000 `shouldReturn` False
+            stopAfter tm (return ()) $ \_ -> return ()
 
     describe "ThreadManager" $ do
         it "fails loudly when a reservation is taken by another manager" $ do
