@@ -21,6 +21,8 @@ module System.ThreadManager (
     newThreadManager,
     stopAfter,
     stopAfterWithResult,
+    stopAfterWithGrace,
+    waitStoppingSTM,
     KilledByThreadManager (..),
 
     -- * Fork
@@ -38,6 +40,7 @@ module System.ThreadManager (
 
     -- * Synchronization
     waitUntilAllGone,
+    waitUntilAllGoneFor,
     isAllGone,
     countManaged,
 ) where
@@ -199,7 +202,7 @@ stopAfter mgr action cleanup =
 -- @since 0.3.2
 stopAfterWithResult
     :: ThreadManager -> IO a -> (Either SomeException a -> IO b) -> IO b
-stopAfterWithResult ThreadManager{..} action cleanup = do
+stopAfterWithResult mgr@ThreadManager{..} action cleanup = do
     E.mask $ \unmask -> do
         ma <- E.try $ unmask action
         -- The threads are left in the map rather than taken out of it:
@@ -209,14 +212,48 @@ stopAfterWithResult ThreadManager{..} action cleanup = do
         -- caller which frees what they were using.  They should take
         -- themselves out as they end, and 'managerStopped' is what keeps
         -- new ones from arriving.
-        m <- atomically $ do
-            writeTVar managerStopped True
-            readTVar managedThreads
-        let ths = Map.elems m
-            er = either Just (const Nothing) ma
-            ex = KilledByThreadManager er
-        forM_ ths $ \(ManagedThread wtid ref) -> lockAndKill wtid ref ex
+        atomically $ writeTVar managerStopped True
+        killAll mgr ma
         cleanup ma
+
+-- | Killing every thread the manager has, telling them how the action
+--   ended.
+killAll :: ThreadManager -> Either SomeException a -> IO ()
+killAll ThreadManager{..} ma = do
+    ths <- Map.elems <$> readTVarIO managedThreads
+    let ex = KilledByThreadManager $ either Just (const Nothing) ma
+    forM_ ths $ \(ManagedThread wtid ref) -> lockAndKill wtid ref ex
+
+-- | Like 'stopAfter', but the threads are told rather than killed.
+--
+-- Once the action is done, the manager is stopped as by 'stopAfter', which
+-- 'waitStoppingSTM' tells the threads.  They are given this many
+-- microseconds to end by themselves, and only the ones still there after
+-- that are killed, as the last resort.  The cleanup runs then.
+--
+-- This is for threads of the caller's own, which wait for
+-- 'waitStoppingSTM' alongside what they wait for.  Threads running code
+-- which knows nothing of it are better stopped with 'stopAfter'.
+--
+-- @since 0.5.3
+stopAfterWithGrace
+    :: ThreadManager -> Int -> IO a -> (Maybe SomeException -> IO ()) -> IO a
+stopAfterWithGrace mgr@ThreadManager{..} grace action cleanup =
+    E.mask $ \unmask -> do
+        ma <- E.try $ unmask action
+        atomically $ writeTVar managerStopped True
+        gone <- waitUntilAllGoneFor mgr grace
+        unless gone $ killAll mgr ma
+        cleanup $ either Just (const Nothing) ma
+        either E.throwIO return ma
+
+-- | Succeeding once the manager has been stopped, by 'stopAfter' or
+--   'stopAfterWithGrace'.  A managed thread waits for this alongside what
+--   it waits for, and ends by itself when it succeeds.
+--
+-- @since 0.5.3
+waitStoppingSTM :: ThreadManager -> STM ()
+waitStoppingSTM ThreadManager{..} = readTVar managerStopped >>= check
 
 ----------------------------------------------------------------
 
@@ -454,6 +491,18 @@ waitUntilAllGone :: ThreadManager -> IO ()
 waitUntilAllGone tm =
     atomically $
         isAllGone tm >>= check
+
+-- | 'waitUntilAllGone' for at most this many microseconds, answering
+--   whether they are all gone.  The time is waited out in STM, not with a
+--   timeout's asynchronous exception; the wait is interruptible all the
+--   same.
+--
+-- @since 0.5.3
+waitUntilAllGoneFor :: ThreadManager -> Int -> IO Bool
+waitUntilAllGoneFor tm us = do
+    late <- registerDelay us
+    atomically $
+        (True <$ (isAllGone tm >>= check)) `orElse` (False <$ (readTVar late >>= check))
 
 -- | STM action that checks if all managed threads are finished.
 isAllGone :: ThreadManager -> STM Bool
