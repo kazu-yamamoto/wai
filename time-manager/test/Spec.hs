@@ -2,6 +2,8 @@
 {-# LANGUAGE NumericUnderscores #-}
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE StandaloneDeriving #-}
+{-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE NoMonoLocalBinds #-}
 {-# OPTIONS_GHC -Wno-orphans #-}
 
 module Main where
@@ -24,7 +26,8 @@ import Control.Concurrent (
     tryPutMVar,
     yield,
  )
-import Control.Concurrent.STM (atomically)
+import Control.Concurrent.STM (atomically, newTVarIO, readTVar, writeTVar)
+import qualified Control.Concurrent.STM as STM
 import Control.Exception (AssertionFailed (..), finally, throwIO)
 import qualified Control.Exception as E
 import Control.Monad (forM_, unless, void, when)
@@ -59,11 +62,28 @@ import System.ThreadManager (
  )
 import System.TimeManager
 import System.TimeManager.Internal
+import System.Watchdog (
+    WatchdogFor (..),
+    newWatchdog,
+    setTimeoutProbing,
+    timedOutSTM,
+    update,
+    withWatchdog,
+ )
 import qualified System.Timeout as Timeout
 import Test.HUnit (assertBool)
 
 main :: IO ()
 main = hspec $ do
+    describe "Watchdog, probing" $ do
+        it "keeps a task whose peer answers the probe" $ do
+            (r, probes) <- probing True
+            r `shouldBe` Nothing
+            probes `shouldSatisfy` (>= 2)
+        it "times out a task whose peer does not answer, after one probe" $ do
+            (r, probes) <- probing False
+            r `shouldBe` Just ()
+            probes `shouldBe` 1
     describe "ThreadManager, once stopped" $ do
         -- 'setup' refuses to record a thread forked before the stop and
         -- scheduled after it, by throwing.  That must not escape the fork,
@@ -475,3 +495,31 @@ oldResume h | isEmptyHandle h = return ()
 oldResume Handle{..} = do
     key <- EV.registerTimeout handleTimerManager handleTimeout handleAction
     I.writeIORef handleState $ Active key
+
+----------------------------------------------------------------
+
+data Probed
+
+instance WatchdogFor Probed where
+    data ContextFor Probed = Probed (IO ())
+    decide _ (Probed probe) = return $ setTimeoutProbing 200_000 probe
+
+-- | Watching a task for a second, with a timeout of 0.2 seconds whose
+--   probe a peer answers, or not: whether it timed out, and how many
+--   probes were sent.
+probing :: Bool -> IO (Maybe (), Int)
+probing answers = do
+    probes <- newIORef (0 :: Int)
+    pinged <- newTVarIO False
+    let probe = do
+            atomicModifyIORef' probes $ \n -> (n + 1, ())
+            atomically $ writeTVar pinged True
+    wd <- newWatchdog $ Probed probe
+    when answers $ void $ forkIO $ forever' $ do
+        atomically $ readTVar pinged >>= STM.check >> writeTVar pinged False
+        update id wd
+    r <- withWatchdog wd (return ()) $
+        Timeout.timeout 1_000_000 $ atomically $ timedOutSTM wd
+    (,) r <$> readIORef probes
+  where
+    forever' io = io >> forever' io

@@ -58,6 +58,11 @@
 -- The watchdog looks at the task at most once per a quarter of the
 -- timeout it is waiting out (capped at one second), so a timeout may fire
 -- up to that much late, never early.
+--
+-- A timeout is meant for a peer that is gone or does not send what it
+-- owes, not for one that is merely slow. Where the protocol has a ping,
+-- 'setTimeoutProbing' asks a quiet peer for a sign of life before giving
+-- up on it.
 module System.Watchdog (
     -- * A watchdog, and what it watches
     Watchdog,
@@ -71,6 +76,7 @@ module System.Watchdog (
     Action,
     ignore,
     setTimeout,
+    setTimeoutProbing,
     unlimited,
     abort,
     timedOut,
@@ -131,6 +137,8 @@ data Action
     = Ignore
     | -- | In microseconds.
       SetTimeout !Word64
+    | -- | In microseconds, with the probe.
+      SetTimeoutProbing !Word64 (IO ())
     | Unlimited
     | Abort
     | TimedOut
@@ -144,6 +152,15 @@ ignore = Ignore
 --   at once.
 setTimeout :: Word64 -> Action
 setTimeout = SetTimeout
+
+-- | 'setTimeout', but asking the peer for a sign of life first: once
+--   half of it has passed with nothing recorded, the probe runs, once.
+--   A protocol sends a PING there, whose answer the task records, so a
+--   live peer never times out. The probe runs on the watchdog's thread
+--   and must return at once, as 'decide' must: enqueue the PING, say.
+--   An exception from it ends the supervision of the task.
+setTimeoutProbing :: Word64 -> IO () -> Action
+setTimeoutProbing = SetTimeoutProbing
 
 -- | No limit. The task may take as long as it likes until the
 --   context changes again: an application is running, say.
@@ -262,15 +279,24 @@ watchdog :: WatchdogFor a => Watchdog a -> IO () -> TVar Bool -> IO ()
 watchdog wd lastResort done = do
     Recorded n curr <- readTVarIO $ wdRecorded wd
     action <- decide Nothing curr
-    loop n curr action Nothing Nothing
+    loop n curr action Nothing Nothing Nothing
   where
     -- Applying what 'decide' answered, then waiting for what happens next.
-    loop _ _ Abort _ _ = handOver wd
-    loop n prev action budget0 deadline0 = do
-        (budget, deadline) <- apply action budget0 deadline0
-        ev <- waitFor (Just n) =<< remaining deadline
+    loop _ _ Abort _ _ _ = handOver wd
+    loop n prev action budget0 deadline0 probe0 = do
+        (budget, deadline, probe) <- apply action budget0 deadline0 probe0
+        wait n prev budget deadline probe
+
+    -- Waiting for the task to move, or the time to come: the probe's if
+    -- one is due, which comes before the deadline, or the deadline's.
+    wait n prev budget deadline probe = do
+        ev <- waitFor (Just n) =<< remaining (maybe deadline (Just . fst) probe)
         case ev of
             Stop -> return ()
+            Expired
+                | Just (_, run) <- probe -> do
+                    run
+                    wait n prev budget deadline Nothing
             Changed -> do
                 -- However busy the task is, look at it once per
                 -- interval at most: recording costs a write to a 'TVar'
@@ -283,7 +309,7 @@ watchdog wd lastResort done = do
                     _ -> do
                         Recorded n' curr <- readTVarIO $ wdRecorded wd
                         action' <- decide (Just prev) curr
-                        loop n' curr action' budget deadline
+                        loop n' curr action' budget deadline probe
             Expired -> do
                 atomically $ writeTVar (wdTimedOut wd) True
                 -- The same interval is how long the task is given
@@ -294,14 +320,16 @@ watchdog wd lastResort done = do
                     Stop -> return ()
                     _ -> lastResort
 
-    apply action budget deadline = do
+    apply action budget deadline probe = do
         now <- getNow
         return $ case action of
-            Ignore -> (budget, deadline)
-            Unlimited -> (budget, Nothing)
-            SetTimeout us -> (Just us, Just $ now + us * 1000)
-            TimedOut -> (budget, Just now)
-            Abort -> (budget, deadline)
+            Ignore -> (budget, deadline, probe)
+            Unlimited -> (budget, Nothing, Nothing)
+            SetTimeout us -> (Just us, Just $ now + us * 1000, Nothing)
+            SetTimeoutProbing us run ->
+                (Just us, Just $ now + us * 1000, Just (now + us * 500, run))
+            TimedOut -> (budget, Just now, Nothing)
+            Abort -> (budget, deadline, probe)
 
     -- A quarter of what is being waited out, capped at one second, and
     -- one second when nothing is.  In microseconds.
