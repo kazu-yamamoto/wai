@@ -22,8 +22,9 @@
   and `decide` says what the watchdog should do when that record
   changes. Warp, for example, gives an HTTP/1.1 connection a timeout for
   each phase it is in. A task is watched by one owner at a time and is
-  passed to the next with `handOver`. Based on the watchdog proposed by
-  @goertzenator.
+  passed to the next with `handOver`. `setTimeoutProbing` runs a probe
+  (a PING, say) halfway through a timeout, so that a live peer is not
+  timed out. Based on the watchdog proposed by @goertzenator.
   [#1116](https://github.com/yesodweb/wai/pull/1116)
   [#1122](https://github.com/yesodweb/wai/pull/1122)
 
