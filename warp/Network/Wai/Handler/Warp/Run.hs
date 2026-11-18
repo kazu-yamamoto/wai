@@ -58,7 +58,6 @@ import System.Environment (lookupEnv)
 import System.IO.Error (ioeGetErrorType)
 import qualified System.ThreadManager as T
 import qualified System.TimeManager as T
-import System.Timeout (timeout)
 
 import Network.Wai.Handler.Warp.Buffer (createWriteBuffer)
 import Network.Wai.Handler.Warp.Counter
@@ -748,7 +747,7 @@ gracefulShutdown set counter = do
         Nothing ->
             waitForZero counter
         (Just seconds) ->
-            void (timeout (seconds * microsPerSecond) (waitForZero counter))
+            void $ waitForZeroFor counter $ seconds * microsPerSecond
   where
     microsPerSecond = 1_000_000
     setShuttingDown =
