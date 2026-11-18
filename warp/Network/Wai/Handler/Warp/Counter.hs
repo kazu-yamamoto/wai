@@ -5,6 +5,7 @@ module Network.Wai.Handler.Warp.Counter (
     newCounter,
     HasDecreased (..),
     waitForZero,
+    waitForZeroFor,
     forkConnection,
     waitForDecreased,
     getCount,
@@ -19,6 +20,7 @@ import System.ThreadManager (
     forkManagedBy,
     newThreadManager,
     waitUntilAllGone,
+    waitUntilAllGoneFor,
  )
 
 -- | The connections of a server: how many there are, and which threads
@@ -39,6 +41,11 @@ threadManager (Counter tm) = tm
 
 waitForZero :: Counter -> IO ()
 waitForZero (Counter tm) = waitUntilAllGone tm
+
+-- | 'waitForZero' for at most the given microseconds, saying whether the
+--   connections are gone.
+waitForZeroFor :: Counter -> Int -> IO Bool
+waitForZeroFor (Counter tm) = waitUntilAllGoneFor tm
 
 data HasDecreased = HasDecreased | NoConnections
     deriving (Eq, Show)

@@ -46,6 +46,32 @@ spec = describe "graceful shutdown" $ do
             timeout 2_000_000 (byManager <$> takeMVar killed) `shouldReturn` Just True
             close client
 
+    it "kills what it is still serving once the grace has passed" $ do
+        servingNow <- newEmptyMVar
+        stopSlot <- newEmptyMVar
+        killed <- newEmptyMVar
+        let settings =
+                setInstallShutdownHandler (putMVar stopSlot) $
+                    setGracefulShutdownTimeout (Just 1) $
+                        setOnException (\_ _ -> pure ()) defaultSettings
+            app _ respond =
+                ( do
+                    putMVar servingNow ()
+                    threadDelay 10_000_000
+                    respond $ responseLBS status200 [] ""
+                )
+                    `E.catch` \e -> putMVar killed e >> E.throwIO e
+        bracket openFreePort (close . snd) $ \(testPort, sock) ->
+            withAsync (runSettingsSocket settings sock app) $ \server -> do
+                stopAccepting <- takeMVar stopSlot
+                client <- openConnection testPort
+                sendAll client "GET / HTTP/1.1\r\nHost: localhost\r\n\r\n"
+                timeout 2_000_000 (takeMVar servingNow) `shouldReturn` Just ()
+                stopAccepting
+                timeout 5_000_000 (wait server) `shouldReturn` Just ()
+                timeout 1_000_000 (byManager <$> takeMVar killed) `shouldReturn` Just True
+                close client
+
     it "waits for a connection accepted just before it stopped accepting" $ do
         -- The window is between accepting a connection and the thread
         -- serving it being scheduled. Delaying the thread makes it wide
