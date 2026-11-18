@@ -48,7 +48,8 @@ test-suite spec
     other-modules:
         System.ThreadManager,
         System.TimeManager,
-        System.TimeManager.Internal
+        System.TimeManager.Internal,
+        System.Watchdog
 
     if os(windows)
         other-modules: System.TimeManager.Windows
