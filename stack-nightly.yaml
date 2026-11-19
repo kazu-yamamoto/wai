@@ -23,15 +23,28 @@ nix:
     - fcgi
     - zlib
 extra-deps:
-  - http-semantics-0.4.2
-  - network-3.2.12.0
-  # TEMPORARY: http2 with confTimeout (kazu-yamamoto/http2#213), until it
-  # is released. Revert to a Hackage version before merging.
+  - tls-session-manager-0.1.2
+  - hpke-0.4.0
+  - ech-config-0.0.2
+  - crypton-x509-validation-1.10.3
+  - crypton-x509-system-1.10.1
+  - crypton-x509-store-1.10.1
+  - crypton-x509-1.10.3
+  - network-3.2.14.0
+  - network-control-0.2.0
+  # TEMPORARY: unreleased http-semantics, http2, quic and http3 from git.
+  # Revert to Hackage versions before merging.
+  - git: https://github.com/kazu-yamamoto/http-semantics
+    commit: 0333415076b553e1d9966818730aa0c8cbd4413c
   - git: https://github.com/kazu-yamamoto/http2
-    commit: f3f0ed5708a3b98f66a03f3057063e0c2ab8499d
-  - http3-0.1.9
-  - quic-0.3.18
-  - crypton-2.1.10
+    commit: 30406878e1efc635ce4d71f88ef8fb374983b1e3
+  - git: https://github.com/kazu-yamamoto/quic
+    commit: 6ebdcdfc25cb24d5af61e58918472f311d6ec19b
+  - git: https://github.com/kazu-yamamoto/http3
+    commit: 1442361cbe38af454f828f804c9cc469b499572b
+  - crypton-2.2.7
+  - crypto-token-0.2.1
+  - tls-2.5.3
 allow-newer: true
 allow-newer-deps:
   - http2
