@@ -14,7 +14,6 @@ import qualified Control.Exception as E
 import Data.IORef (readIORef)
 import qualified Data.IORef as I
 import GHC.Conc.Sync (labelThread, myThreadId)
-import qualified Network.HTTP2.Client as H2C
 import qualified Network.HTTP2.Frame as H2
 import qualified Network.HTTP2.Server as H2
 import Network.Socket (SockAddr)
@@ -98,15 +97,9 @@ http2 settings ii conn cc transport app peersa _th bs = do
     when ok $ do
         -- The connection is the http2 library's from here.
         handOver $ connWatchdog cc
-        endedNormally $
-            runH2 settings conf $
-                http2server "Warp HTTP/2" settings ii transport peersa app
+        runH2 settings conf $
+            http2server "Warp HTTP/2" settings ii transport peersa app
   where
-    -- http2 ends a connection which has run its course with
-    -- 'ConnectionIsClosed', which is no exception to report.
-    endedNormally = E.handle $ \e -> case e of
-        H2C.ConnectionIsClosed -> return ()
-        _ -> E.throwIO e
     -- A GOAWAY ends the connection, so there is nothing left to serve
     -- on it.
     checkTLS = case transport of
@@ -140,7 +133,7 @@ http2server
 http2server label settings ii transport addr app h2req0 aux0 response = do
     tid <- myThreadId
     labelThread tid (label ++ " http2server " ++ show addr)
-    req0 <- toWAIRequest h2req0 aux0
+    req0 <- toWAIRequest h2req0
 #if HAS_EARLY_HINTS_SUPPORT
     let req = req0{requestSendEarlyHints = H2.auxSendInformational aux0 (H.mkStatus 103 "Early Hints")}
 #else
@@ -180,12 +173,13 @@ http2server label settings ii transport addr app h2req0 aux0 response = do
                         logSent (h2rsp, [], responseStatus ersp)
     return ()
   where
-    toWAIRequest h2req aux = toRequest ii settings addr hdr bdylen bdy th transport
+    toWAIRequest h2req = toRequest ii settings addr hdr bdylen bdy th transport
       where
         !hdr = H2.requestHeaders h2req
         !bdy = H2.getRequestBodyChunk h2req
         !bdylen = H2.requestBodySize h2req
-        !th = H2.auxTimeHandle aux
+        -- http2 supervises the connection, not each request.
+        !th = T.emptyHandle
 
     logResponse = S.settingsLogger settings
 
