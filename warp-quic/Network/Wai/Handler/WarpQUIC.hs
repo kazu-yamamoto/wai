@@ -122,14 +122,16 @@ quicApp settings drn app ii conn = do
                 , quicClientCertificate = mccc
                 }
         pread = pReadMaker ii
-        timmgr = timeoutManager ii
 #if !MIN_VERSION_http3(0,1,0)
-        conf = H3.Config H3.defaultHooks pread timmgr
+        conf = H3.Config H3.defaultHooks pread $ timeoutManager ii
+#elif MIN_VERSION_http3(0,2,0)
+        -- http3 0.2 takes no time manager: quic's idle timeout supervises.
+        conf = H3.defaultConfig{H3.confPositionReadMaker = pread}
 #else
         conf =
             H3.defaultConfig
                 { H3.confPositionReadMaker = pread
-                , H3.confTimeoutManager = timmgr
+                , H3.confTimeoutManager = timeoutManager ii
                 }
 #endif
         server label = http2server label settings ii transport addr app
