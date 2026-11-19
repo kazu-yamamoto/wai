@@ -9,8 +9,9 @@ module Network.Wai.Handler.Warp.HTTP2 (
     http2server,
 ) where
 
-import Control.Concurrent.STM (atomically, check, writeTVar)
+import Control.Concurrent.STM (atomically, check, orElse, writeTVar)
 import qualified Control.Exception as E
+import qualified Data.ByteString as BS
 import Data.IORef (readIORef)
 import qualified Data.IORef as I
 import GHC.Conc.Sync (labelThread, myThreadId)
@@ -69,14 +70,20 @@ http2 settings ii conn cc transport app peersa _th bs = do
         sendBS = connSendAll conn
         -- The http2 library says what to give up on through
         -- 'connSendGiveUp', which the sends of the connection read.
-        sendBSWith giveUp frame = do
+        sendBSWith frame giveUp = do
             atomically $ writeTVar (connSendGiveUp cc) giveUp
             (Right () <$ sendBS frame) `E.catch` \T.TimeoutThread -> return (Left ())
         -- And what a read gives up on through 'connRecvGiveUp', so that
-        -- the receiver is stopped without being interrupted.
-        recvNWith giveUp n = do
+        -- the receiver is stopped without being interrupted.  A short read
+        -- is a give-up if the action has fired, and the end of input if not.
+        recvNWith n giveUp = do
             atomically $ writeTVar (connRecvGiveUp cc) giveUp
-            recvN n
+            r <- recvN n
+            if BS.length r == n
+                then return $ Right r
+                else do
+                    gaveUp <- atomically $ (True <$ giveUp) `orElse` return False
+                    return $ if gaveUp then Left () else Right r
         conf =
             H2.defaultConfig
                 { H2.confWriteBuffer = bufBuffer writeBuffer
