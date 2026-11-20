@@ -33,9 +33,9 @@ extra-deps:
   # TEMPORARY: unreleased http-semantics and http2 from git.
   # Revert to Hackage versions before merging.
   - git: https://github.com/kazu-yamamoto/http-semantics
-    commit: 0333415076b553e1d9966818730aa0c8cbd4413c
+    commit: ee8038f7b4603f633f271b26b58328ae9382caa3
   - git: https://github.com/kazu-yamamoto/http2
-    commit: 30406878e1efc635ce4d71f88ef8fb374983b1e3
+    commit: ae94d4122691bda919d735990ab1ee5d45bde52f
   - network-3.2.14.0
   - network-control-0.2.0
   - random-1.3.1

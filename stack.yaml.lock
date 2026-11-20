@@ -96,48 +96,48 @@ packages:
   original:
     hackage: hpke-0.4.0
 - completed:
-    commit: 0333415076b553e1d9966818730aa0c8cbd4413c
+    commit: ee8038f7b4603f633f271b26b58328ae9382caa3
     git: https://github.com/kazu-yamamoto/http-semantics
     name: http-semantics
     pantry-tree:
-      sha256: 2eb6a07f90dd2999f4eee22d9b9235e3d7ba072029c46ade57317387c94be9ce
+      sha256: 16eb819526a0f0184d0d5259cf2600dcc2f8d45718671017381259bceb0f9042
       size: 1310
     version: 0.4.2
   original:
-    commit: 0333415076b553e1d9966818730aa0c8cbd4413c
+    commit: ee8038f7b4603f633f271b26b58328ae9382caa3
     git: https://github.com/kazu-yamamoto/http-semantics
 - completed:
-    commit: 30406878e1efc635ce4d71f88ef8fb374983b1e3
+    commit: ae94d4122691bda919d735990ab1ee5d45bde52f
     git: https://github.com/kazu-yamamoto/http2
     name: http2
     pantry-tree:
-      sha256: 6f63e8be36562644aa46cb96590bc836b252ae64247176c9c667287a6721f366
+      sha256: 00df4746d59476f1c36519df776502e5c4f606302e63607a5be036edf05ae2c9
       size: 52639
     version: 5.4.14
   original:
-    commit: 30406878e1efc635ce4d71f88ef8fb374983b1e3
+    commit: ae94d4122691bda919d735990ab1ee5d45bde52f
     git: https://github.com/kazu-yamamoto/http2
 - completed:
-    commit: 0058ef605d1810970bf4c26b332772b43bdeb54c
+    commit: 9528eac2f9a4e79f201af562f9a5d5d8f38f8475
     git: https://github.com/kazu-yamamoto/quic
     name: quic
     pantry-tree:
-      sha256: 5121d08d9097c5b1c27eb9a002bcd8619b85852b9c5546d330c402e192fa4b4a
+      sha256: 614e32ce689afa8bdac26fbfcbae51f175e4fc7aee49e2341e200205ca804719
       size: 8715
     version: 0.3.24
   original:
-    commit: 0058ef605d1810970bf4c26b332772b43bdeb54c
+    commit: 9528eac2f9a4e79f201af562f9a5d5d8f38f8475
     git: https://github.com/kazu-yamamoto/quic
 - completed:
-    commit: 9141302805a4727956afa0a4984722784b114d76
+    commit: 401d35b4137caee8e7077cbd9e3269f743da4774
     git: https://github.com/kazu-yamamoto/http3
     name: http3
     pantry-tree:
-      sha256: 5c803ba0373472b58ba3686d89e99d8bf50dac2e3f9e42c82c7f8081181c6d5f
+      sha256: 741c9b2fecf55d7b9984e5e7d0faf98664d7d2f735049f9449b256004541637e
       size: 53637
     version: 0.1.12
   original:
-    commit: 9141302805a4727956afa0a4984722784b114d76
+    commit: 401d35b4137caee8e7077cbd9e3269f743da4774
     git: https://github.com/kazu-yamamoto/http3
 - completed:
     hackage: mlkem-0.2.2.0@sha256:c16cb61190e915593767e716dd08957607f6045a01d7c3a1313fbd74eb31c75d,4759

@@ -39,13 +39,13 @@ extra-deps:
   # TEMPORARY: unreleased http-semantics, http2, quic and http3 from git.
   # Revert to Hackage versions before merging.
   - git: https://github.com/kazu-yamamoto/http-semantics
-    commit: 0333415076b553e1d9966818730aa0c8cbd4413c
+    commit: ee8038f7b4603f633f271b26b58328ae9382caa3
   - git: https://github.com/kazu-yamamoto/http2
-    commit: 30406878e1efc635ce4d71f88ef8fb374983b1e3
+    commit: ae94d4122691bda919d735990ab1ee5d45bde52f
   - git: https://github.com/kazu-yamamoto/quic
-    commit: 0058ef605d1810970bf4c26b332772b43bdeb54c
+    commit: 9528eac2f9a4e79f201af562f9a5d5d8f38f8475
   - git: https://github.com/kazu-yamamoto/http3
-    commit: 9141302805a4727956afa0a4984722784b114d76
+    commit: 401d35b4137caee8e7077cbd9e3269f743da4774
   - mlkem-0.2.2.0
   - network-3.2.14.0
   - network-control-0.2.0
