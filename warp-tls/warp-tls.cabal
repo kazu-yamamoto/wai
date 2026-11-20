@@ -58,5 +58,5 @@ Test-Suite spec
                , warp >= 3.4.18 && < 3.6
                , warp-tls
 
-  if os(windows)
+  if os(windows) && (impl(ghc >= 9.12.5 && < 9.14) || impl(ghc >= 9.14.2))
     Ghc-Options: -with-rtsopts=--io-manager=native
