@@ -23,6 +23,7 @@ nix:
     - fcgi
     - zlib
 extra-deps:
+  - tls-2.6.0
   - ech-config-0.0.2
   - crypto-token-0.2.1
   - fast-logger-3.2.8
@@ -35,7 +36,7 @@ extra-deps:
   - crypton-x509-system-1.10.1
   - crypton-x509-validation-1.10.3
   - hpke-0.4.0
-  # TEMPORARY: unreleased http-semantics, http2, quic, http3 and tls from git.
+  # TEMPORARY: unreleased http-semantics, http2, quic and http3 from git.
   # Revert to Hackage versions before merging.
   - git: https://github.com/kazu-yamamoto/http-semantics
     commit: 0333415076b553e1d9966818730aa0c8cbd4413c
@@ -45,19 +46,14 @@ extra-deps:
     commit: 0058ef605d1810970bf4c26b332772b43bdeb54c
   - git: https://github.com/kazu-yamamoto/http3
     commit: 9141302805a4727956afa0a4984722784b114d76
-  - git: https://github.com/haskell-tls/hs-tls
-    commit: d1e6c2d796bbb77f30b87371fd702dda272f0083
-    subdirs:
-      - tls
   - mlkem-0.2.2.0
   - network-3.2.14.0
   - network-control-0.2.0
   - ram-0.22.0
   - sockaddr-0.0.1
   - time-hourglass-0.3.0
-  - tls-session-manager-0.1.2
+  - tls-session-manager-0.1.2@rev:1
 allow-newer: true
 allow-newer-deps:
   - http2
   - http3
-  - tls-session-manager

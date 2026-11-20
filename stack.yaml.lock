@@ -5,6 +5,13 @@
 
 packages:
 - completed:
+    hackage: tls-2.6.0@sha256:fc3bc85c1413fc31a953ccf0531b323620cdbd35378037470ddf7744e7252ca8,6730
+    pantry-tree:
+      sha256: 081d3f0f70f35800844bb53a90b07aa6df8bcf54a654cc6c6bad4af757bf06cd
+      size: 7253
+  original:
+    hackage: tls-2.6.0
+- completed:
     hackage: ech-config-0.0.2@sha256:5ed06dae7c7a342fc16a69804d2614e4dbe68da27d5ad79d5a7d024defa67e02,1323
     pantry-tree:
       sha256: 76de4a8ce62e7ff4d1b508d97222a297069474d789855c4174d8c36d87d0f907
@@ -133,19 +140,6 @@ packages:
     commit: 9141302805a4727956afa0a4984722784b114d76
     git: https://github.com/kazu-yamamoto/http3
 - completed:
-    commit: d1e6c2d796bbb77f30b87371fd702dda272f0083
-    git: https://github.com/haskell-tls/hs-tls
-    name: tls
-    pantry-tree:
-      sha256: ffe12f3d5e4612b4d9a09865d2838c8108b19af9ca2cb3bbdd2ec018aebff484
-      size: 7596
-    subdir: tls
-    version: 2.6.0
-  original:
-    commit: d1e6c2d796bbb77f30b87371fd702dda272f0083
-    git: https://github.com/haskell-tls/hs-tls
-    subdir: tls
-- completed:
     hackage: mlkem-0.2.2.0@sha256:c16cb61190e915593767e716dd08957607f6045a01d7c3a1313fbd74eb31c75d,4759
     pantry-tree:
       sha256: 298f091aa073627626cea668774160a8af1b42771d4f00069a60239f4704d465
@@ -188,12 +182,12 @@ packages:
   original:
     hackage: time-hourglass-0.3.0
 - completed:
-    hackage: tls-session-manager-0.1.2@sha256:3ddd76bb0b961fb6c97c821122248761355c658c4bdcac98db290ef3181210d7,1552
+    hackage: tls-session-manager-0.1.2@sha256:5af13b0abe30de6e561c862987d2baa22820c79a36bfb4c17a7666308d6a01c7,1566
     pantry-tree:
-      sha256: ce2e88b488e43b45caa67e39a513c852a2806f2b7cf0963f6ff14033630311d0
+      sha256: ba6b570f2cb143ba6a1982f293b3190bbd35fae00279f766257360feeafc8b7e
       size: 613
   original:
-    hackage: tls-session-manager-0.1.2
+    hackage: tls-session-manager-0.1.2@rev:1
 snapshots:
 - completed:
     sha256: 3286bb954fe0e7e0291ca61fac01a689b7165da9d7e8ba3c3a045be989c860fd
