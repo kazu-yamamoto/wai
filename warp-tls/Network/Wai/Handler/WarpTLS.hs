@@ -490,7 +490,11 @@ httpOverTls TLSSettings{..} set s bs0 params =
 #endif
         rawRecvN <- makeRecvN bs0 recv
         let recvN = wrappedRecvN rawRecvN
+#if MIN_VERSION_warp(3,5,0) && MIN_VERSION_tls(2,6,0)
+        ctx <- TLS.contextNew (GivingUpBackend (backend send recvN) (recvNWith recvN)) params
+#else
         ctx <- TLS.contextNew (backend send recvN) params
+#endif
         TLS.contextHookSetLogging ctx tlsLogging
 #if MIN_VERSION_warp(3,5,0)
         -- No timeout here: warp's watchdog is already watching this
@@ -536,6 +540,17 @@ httpOverTls TLSSettings{..} set s bs0 params =
             , TLS.backendSend = send
             , TLS.backendRecv = recvN
             }
+#if MIN_VERSION_warp(3,5,0) && MIN_VERSION_tls(2,6,0)
+    -- A receive which 'bye' gives up on too, through what warp's recv
+    -- gives up on: it then ends as at end of input.
+    recvNWith recvN = TLS.RecvWith $ \n stop -> do
+        given <- newTVarIO Nothing
+        let var = connRecvGiveUp cc
+        old <- readTVarIO var
+        atomically $ writeTVar var $ old <|> (stop >>= writeTVar given . Just)
+        bs <- recvN n `E.finally` atomically (writeTVar var old)
+        maybe (Right bs) Left <$> readTVarIO given
+#endif
 #if MIN_VERSION_warp(3,5,0)
     -- Giving up on what warp says through 'connSendGiveUp', as its own
     -- sends do, rather than waiting for the last resort, which does not
@@ -558,6 +573,16 @@ httpOverTls TLSSettings{..} set s bs0 params =
             )
             throwIO
 
+#if MIN_VERSION_warp(3,5,0) && MIN_VERSION_tls(2,6,0)
+-- | A 'TLS.Backend' whose receive can also be given up on.
+data GivingUpBackend = GivingUpBackend TLS.Backend TLS.RecvWith
+
+instance TLS.HasBackend GivingUpBackend where
+    initializeBackend _ = return ()
+    getBackend (GivingUpBackend b _) = b
+    getBackendRecvWith (GivingUpBackend _ r) = Just r
+
+#endif
 -- | Get "Connection" and "Transport" for a TLS connection that is already did the handshake.
 -- @since 3.4.7
 attachConn
