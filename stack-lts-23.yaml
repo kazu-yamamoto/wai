@@ -36,25 +36,29 @@ extra-deps:
   - ech-config-0.0.2
   - fast-logger-3.2.8
   - hpke-0.4.0
-  # TEMPORARY: unreleased http-semantics, http2, quic and http3 from git.
+  # TEMPORARY: unreleased http-semantics, http2, quic, http3 and tls from git.
   # Revert to Hackage versions before merging.
   - git: https://github.com/kazu-yamamoto/http-semantics
     commit: 0333415076b553e1d9966818730aa0c8cbd4413c
   - git: https://github.com/kazu-yamamoto/http2
     commit: 30406878e1efc635ce4d71f88ef8fb374983b1e3
   - git: https://github.com/kazu-yamamoto/quic
-    commit: 6ebdcdfc25cb24d5af61e58918472f311d6ec19b
+    commit: 0058ef605d1810970bf4c26b332772b43bdeb54c
   - git: https://github.com/kazu-yamamoto/http3
-    commit: 1442361cbe38af454f828f804c9cc469b499572b
+    commit: 9141302805a4727956afa0a4984722784b114d76
+  - git: https://github.com/haskell-tls/hs-tls
+    commit: d1e6c2d796bbb77f30b87371fd702dda272f0083
+    subdirs:
+      - tls
   - mlkem-0.2.2.0
   - network-3.2.14.0
   - network-control-0.2.0
   - ram-0.22.0
   - sockaddr-0.0.1
   - time-hourglass-0.3.0
-  - tls-2.5.3
   - tls-session-manager-0.1.2
 allow-newer: true
 allow-newer-deps:
   - http2
   - http3
+  - tls-session-manager
