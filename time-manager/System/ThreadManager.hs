@@ -45,6 +45,10 @@ module System.ThreadManager (
     managedThreadId,
     waitManagedSTM,
     pollManagedSTM,
+    waitManaged,
+    waitEitherManagedSTM,
+    concurrentlyManaged_,
+    raceManaged_,
 
     -- * Synchronization
     waitUntilAllGone,
@@ -465,6 +469,46 @@ waitManagedSTM (Managed _ var) = readTMVar var
 -- @since 0.5.3
 pollManagedSTM :: Managed a -> STM (Maybe (Either SomeException a))
 pollManagedSTM (Managed _ var) = tryReadTMVar var
+
+-- | What a thread of 'forkManagedWithResult' returned, or its exception
+--   thrown on, as @wait@ of the async package.
+--
+-- @since 0.5.3
+waitManaged :: Managed a -> IO a
+waitManaged m = atomically (waitManagedSTM m) >>= either E.throwIO return
+
+-- | The first of two threads of 'forkManagedWithResult' to end, its
+--   exception thrown on, as @waitEitherSTM@ of the async package.
+--
+-- @since 0.5.3
+waitEitherManagedSTM :: Managed a -> Managed b -> STM (Either a b)
+waitEitherManagedSTM a b =
+    (Left <$> (waitManagedSTM a >>= either throwSTM return))
+        `orElse` (Right <$> (waitManagedSTM b >>= either throwSTM return))
+
+-- | Running two actions side by side until both have ended, as
+--   @concurrently_@ of the async package: the first exception is thrown
+--   on.  They are threads of a manager stopped with the scope
+--   ('withThreadManager'), under the names given.
+--
+-- @since 0.5.3
+concurrentlyManaged_ :: String -> IO a -> String -> IO b -> IO ()
+concurrentlyManaged_ l1 io1 l2 io2 = withThreadManager $ \mgr -> do
+    a <- forkManagedWithResult mgr l1 io1
+    b <- forkManagedWithResult mgr l2 io2
+    r <- atomically $ waitEitherManagedSTM a b
+    either (\_ -> void $ waitManaged b) (\_ -> void $ waitManaged a) r
+
+-- | Running two actions side by side until either has ended, as @race_@
+--   of the async package: an exception it ended with is thrown on, and
+--   the other is stopped with the scope ('withThreadManager').
+--
+-- @since 0.5.3
+raceManaged_ :: String -> IO a -> String -> IO b -> IO ()
+raceManaged_ l1 io1 l2 io2 = withThreadManager $ \mgr -> do
+    a <- forkManagedWithResult mgr l1 io1
+    b <- forkManagedWithResult mgr l2 io2
+    void $ atomically $ waitEitherManagedSTM a b
 
 ----------------------------------------------------------------
 
