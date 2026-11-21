@@ -34,6 +34,7 @@ import Control.Exception (AssertionFailed (..), finally, throwIO)
 import qualified Control.Exception as E
 import Control.Monad (forM_, unless, void, when)
 import Data.Maybe (isJust, isNothing)
+import System.Mem (performGC)
 import Data.IORef as I (
     IORef,
     atomicModifyIORef',
@@ -157,6 +158,18 @@ main = hspec $ do
             tryTakeMVar done `shouldReturn` Just ()
             r <- E.try $ concurrentlyManaged_ "a" (threadDelay 10_000_000) "b" (throwIO $ userError "b")
             either (\e -> show (e :: E.SomeException)) (const "") r `shouldBe` show (userError "b")
+
+        it "waits again when told that the wait is blocked indefinitely" $ do
+            -- Nothing can wake the thread "a" waits on, so the run-time
+            -- system tells it, and its waiter, at once; "a" then ends.
+            res <- newEmptyMVar
+            let stuck =
+                    (STM.newEmptyTMVarIO >>= atomically . STM.takeTMVar)
+                        `E.catch` \E.BlockedIndefinitelyOnSTM -> return ()
+            _ <- forkIO $ E.try (concurrentlyManaged_ "a" stuck "b" (return ())) >>= putMVar res
+            _ <- forkIO $ forM_ [1 .. 20 :: Int] $ \_ -> threadDelay 50_000 >> performGC
+            r <- Timeout.timeout 3_000_000 $ takeMVar res
+            fmap (either (\e -> show (e :: E.SomeException)) (const "done")) r `shouldBe` Just "done"
 
         it "ends with the first with raceManaged_, and stops the other" $ do
             stopped <- newEmptyMVar
