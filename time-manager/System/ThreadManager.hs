@@ -494,10 +494,11 @@ waitEitherManaged a b = waiting $ waitEitherManagedSTM a b
 -- | Waiting for threads of 'forkManagedWithResult', again if told that the
 --   wait is blocked indefinitely.  Once nothing that could wake the threads
 --   is reachable, the run-time system throws that to them and to whoever
---   waits for them at once, but they then end and say so.  Once, as async
---   does: a wait still blocked after that is.
+--   waits for them at once, but they then end and say so.  Not only once,
+--   as async does: a connection closing can tell a waiter again before its
+--   threads have ended, and the manager stopping ends a wait that never would.
 waiting :: STM a -> IO a
-waiting stm = atomically stm `E.catch` \E.BlockedIndefinitelyOnSTM -> atomically stm
+waiting stm = atomically stm `E.catch` \E.BlockedIndefinitelyOnSTM -> waiting stm
 
 -- | The first of two threads of 'forkManagedWithResult' to end, its
 --   exception thrown on, as @waitEitherSTM@ of the async package.
