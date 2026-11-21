@@ -105,6 +105,8 @@ http2 settings ii conn cc transport app peersa _th bs = do
     when ok $ do
         -- The connection is the http2 library's from here.
         handOver $ connWatchdog cc
+        -- The shutdown is http2's to drain from here, with GOAWAY.
+        atomically $ writeTVar (connHandedOver cc) True
         runH2 settings conf $
             http2server "Warp HTTP/2" settings ii transport peersa app
   where

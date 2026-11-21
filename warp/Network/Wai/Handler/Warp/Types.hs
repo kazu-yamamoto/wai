@@ -194,6 +194,10 @@ data ConnContext = ConnContext
     -- input: nothing to begin with, the http2 library's once an HTTP\/2
     -- connection is handed to it. 'Network.Wai.Handler.Warp.Internal.makeWatchedRecv'
     -- reads it.
+    , connHandedOver :: TVar Bool
+    -- ^ Whether the connection is the http2 library's, which drains it
+    -- itself with GOAWAY when the server shuts down: a receive then no
+    -- longer ends on the shutdown, as it does for HTTP\/1.1.
     }
 
 -- This function isn't used nor exported...

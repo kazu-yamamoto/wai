@@ -160,12 +160,14 @@ newConnContext set = do
     appsInProgress <- newTVarIO 0
     sendGiveUp <- newTVarIO $ timedOutSTM wd
     recvGiveUp <- newTVarIO retry
+    handedOver <- newTVarIO False
     return
         ConnContext
             { connWatchdog = wd
             , connAppsInProgress = appsInProgress
             , connSendGiveUp = sendGiveUp
             , connRecvGiveUp = recvGiveUp
+            , connHandedOver = handedOver
             }
 
 -- | Create a 'Recv' which stops receiving when the server is shutting down
@@ -175,7 +177,7 @@ newConnContext set = do
 -- read and the shutdown are waited for at once, inside 'receiveWith'.
 makeGracefulRecv :: Socket -> BufferPool -> ServerState -> TVar Int -> Recv
 makeGracefulRecv sock pool ss appsInProgress =
-    makeGracefulRecvWith sock pool ss appsInProgress retry retry
+    makeGracefulRecvWith sock pool ss appsInProgress retry (return ()) retry
 
 -- | 'makeGracefulRecv' which also gives up when the 'Watchdog' decides
 -- that the connection timed out, by throwing 'T.TimeoutThread', and ends
@@ -195,13 +197,14 @@ makeWatchedRecv sock pool ss cc = do
         ss
         (connAppsInProgress cc)
         (timedOutSTM $ connWatchdog cc)
+        (readTVar (connHandedOver cc) >>= check . not)
         giveUp
 
 data GiveUp = ShuttingDown | TimedOut
 
 makeGracefulRecvWith
-    :: Socket -> BufferPool -> ServerState -> TVar Int -> STM () -> STM () -> Recv
-makeGracefulRecvWith sock pool ss appsInProgress timedOut giveUp = do
+    :: Socket -> BufferPool -> ServerState -> TVar Int -> STM () -> STM () -> STM () -> Recv
+makeGracefulRecvWith sock pool ss appsInProgress timedOut notHandedOver giveUp = do
     r <- receiveWith sock pool $
         -- when shutting down or told to give up
         ((checkShutdown <|> giveUp) $> ShuttingDown)
@@ -214,6 +217,7 @@ makeGracefulRecvWith sock pool ss appsInProgress timedOut giveUp = do
         Right bs -> return bs
   where
     checkShutdown = do
+        notHandedOver
         check =<< currentShuttingDownStateSTM ss
         check . (<= 0) =<< readTVar appsInProgress
 
