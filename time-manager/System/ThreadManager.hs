@@ -180,7 +180,13 @@ instance Exception KilledByThreadManager where
 withThreadManager :: (ThreadManager -> IO a) -> IO a
 withThreadManager action = do
     mgr <- newThreadManager
-    stopAfter mgr (action mgr) $ \_ -> waitUntilAllGone mgr
+    -- Stopped and waited for uninterruptibly, as async's
+    -- 'uninterruptibleCancel', so that nothing is left behind.
+    E.mask $ \restore -> do
+        r <- E.try $ restore $ action mgr
+        E.uninterruptibleMask_ $
+            stopAfter mgr (return ()) $ \_ -> waitUntilAllGone mgr
+        either (E.throwIO :: SomeException -> IO a) return r
 
 -- | Stopping the manager.
 --
@@ -440,14 +446,15 @@ forkManagedWithResult mgr label io = do
     var <- newEmptyTMVarIO
     let put = atomically . void . tryPutTMVar var
     -- Masked but for the action, so that a kill cannot land between the
-    -- action's end and its being kept.
+    -- action's end and its being kept.  The action runs in the caller's
+    -- masking state, as async's does.
     tid <-
-        E.mask_ $
+        E.mask $ \restore ->
             forkManagedByFinally
                 mgr
-                forkIOWithUnmask
+                (\body -> forkIO $ body restore)
                 label
-                (\unmask -> E.try (unmask io) >>= put)
+                (\restore' -> E.try (restore' io) >>= put)
                 (put $ Left $ E.toException $ KilledByThreadManager Nothing)
     return $ Managed tid var
 
@@ -487,9 +494,10 @@ waitEitherManaged a b = waiting $ waitEitherManagedSTM a b
 -- | Waiting for threads of 'forkManagedWithResult', again if told that the
 --   wait is blocked indefinitely.  Once nothing that could wake the threads
 --   is reachable, the run-time system throws that to them and to whoever
---   waits for them at once, but they then end and say so; as async does.
+--   waits for them at once, but they then end and say so.  Once, as async
+--   does: a wait still blocked after that is.
 waiting :: STM a -> IO a
-waiting stm = atomically stm `E.catch` \E.BlockedIndefinitelyOnSTM -> waiting stm
+waiting stm = atomically stm `E.catch` \E.BlockedIndefinitelyOnSTM -> atomically stm
 
 -- | The first of two threads of 'forkManagedWithResult' to end, its
 --   exception thrown on, as @waitEitherSTM@ of the async package.
