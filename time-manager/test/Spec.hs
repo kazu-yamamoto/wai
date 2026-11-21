@@ -31,6 +31,7 @@ import qualified Control.Concurrent.STM as STM
 import Control.Exception (AssertionFailed (..), finally, throwIO)
 import qualified Control.Exception as E
 import Control.Monad (forM_, unless, void, when)
+import Data.Maybe (isJust, isNothing)
 import Data.IORef as I (
     IORef,
     atomicModifyIORef',
@@ -44,6 +45,7 @@ import GHC.Conc.Sync (
     setUncaughtExceptionHandler,
  )
 import System.ThreadManager (
+    KilledByThreadManager,
     ThreadManager,
     countManaged,
     forkManaged,
@@ -51,11 +53,14 @@ import System.ThreadManager (
     forkManagedTimeout,
     forkManagedTimeoutFinally,
     forkManagedUnmaskFinally,
+    forkManagedWithResult,
     newThreadManager,
+    pollManagedSTM,
     reserveManaged,
     stopAfter,
     stopAfterWithGrace,
     takeReservation,
+    waitManagedSTM,
     waitStoppingSTM,
     waitUntilAllGone,
     waitUntilAllGoneFor,
@@ -118,6 +123,46 @@ main = hspec $ do
 
         itLetsTheExceptionOutOf "forkManagedUnmaskFinally" $
             \tm label io -> forkManagedUnmaskFinally tm label (\unmask -> unmask io)
+
+    describe "ThreadManager, threads with a result" $ do
+        it "keeps what the thread returned" $ do
+            tm <- newThreadManager
+            m <- forkManagedWithResult tm "probe" $ return (42 :: Int)
+            r <- atomically $ waitManagedSTM m
+            either (const Nothing) Just r `shouldBe` Just 42
+            waitUntilAllGoneFor tm 1_000_000 `shouldReturn` True
+
+        it "keeps what the thread threw, and does not throw it on" $ do
+            tm <- newThreadManager
+            m <- forkManagedWithResult tm "probe" $ throwIO (userError "boom") >> return ()
+            r <- atomically $ waitManagedSTM m
+            either (\e -> show e) (const "") r `shouldBe` show (userError "boom")
+
+        it "tells nothing before the thread has ended" $ do
+            tm <- newThreadManager
+            go <- newEmptyMVar
+            m <- forkManagedWithResult tm "probe" $ takeMVar go
+            atomically (isNothing <$> pollManagedSTM m) `shouldReturn` True
+            putMVar go ()
+            r <- atomically $ waitManagedSTM m
+            either (const False) (const True) r `shouldBe` True
+
+        it "ends with the kill of the manager stopping" $ do
+            tm <- newThreadManager
+            m <- forkManagedWithResult tm "probe" $ threadDelay 10_000_000
+            threadDelay 50_000
+            stopAfter tm (return ()) $ \_ -> return ()
+            r <- Timeout.timeout 1_000_000 $ atomically $ waitManagedSTM m
+            fmap (either (isJust . (E.fromException :: E.SomeException -> Maybe KilledByThreadManager)) (const False)) r
+                `shouldBe` Just True
+
+        it "ends a thread the stopped manager does not run" $ do
+            tm <- newThreadManager
+            stopAfter tm (return ()) $ \_ -> return ()
+            m <- forkManagedWithResult tm "probe" $ return ()
+            r <- Timeout.timeout 1_000_000 $ atomically $ waitManagedSTM m
+            fmap (either (isJust . (E.fromException :: E.SomeException -> Maybe KilledByThreadManager)) (const False)) r
+                `shouldBe` Just True
 
     describe "ThreadManager, stopped with a grace" $ do
         it "lets a thread waiting for the stop end by itself" $ do
