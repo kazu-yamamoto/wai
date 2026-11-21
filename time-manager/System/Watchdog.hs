@@ -93,7 +93,7 @@ module System.Watchdog (
 ) where
 
 import Control.Applicative ((<|>))
-import Control.Concurrent (forkIO)
+import Control.Concurrent (forkIOWithUnmask)
 import Control.Concurrent.STM
 import qualified Control.Exception as E
 import Control.Monad (void)
@@ -262,14 +262,14 @@ data Event = Stop | Changed | Expired
 --   out, the second argument is run as the last resort, typically
 --   throwing an exception to the thread running the body.
 withWatchdog :: WatchdogFor a => Watchdog a -> IO () -> IO b -> IO b
-withWatchdog wd lastResort body = do
+withWatchdog wd lastResort body = E.mask $ \restore -> do
     done <- newTVarIO False
     finished <- newTVarIO False
-    void $ forkIO $ do
+    void $ forkIOWithUnmask $ \unmask -> do
         myThreadId >>= \me -> labelThread me "watchdog"
-        watchdog wd lastResort done
+        unmask (watchdog wd lastResort done)
             `E.finally` atomically (writeTVar finished True)
-    body `E.finally` do
+    restore body `E.finally` do
         atomically $ writeTVar done True
         -- The last resort may be on its way.
         atomically $ readTVar finished >>= check

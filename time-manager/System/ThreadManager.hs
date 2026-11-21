@@ -66,7 +66,8 @@ import Control.Exception (
 import qualified Control.Exception as E
 import Control.Monad (unless, void, when)
 import Data.Foldable (forM_)
-import Data.IORef (IORef, atomicModifyIORef', newIORef)
+import Data.IORef (IORef, atomicModifyIORef', newIORef, readIORef)
+import Data.Maybe (isJust)
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import Data.Word (Word64)
@@ -95,12 +96,19 @@ type ManagedThreads = Map Key ManagedThread
 
 ----------------------------------------------------------------
 
--- The 'IORef' prevents a race between the timeout of
--- 'forkManagedTimeout' and 'forkManagedTimeoutFinally', which the time
--- manager runs, and 'stopAfter'.  Both throw 'KilledByThreadManager'.
--- It is initialized with 'False' and turned into 'True' when locked.
--- The winner can throw an asynchronous exception.
-data ManagedThread = ManagedThread (Weak ThreadId) (IORef Bool)
+-- The 'IORef' keeps the kills of the timeout of 'forkManagedTimeout'
+-- and of 'stopAfter' in order with each other and with the thread's end:
+-- once the thread is finishing, no kill is decided on, and one decided on
+-- before is waited for there and caught, rather than cutting the cleanup
+-- short or landing after the thread has left.
+data ManagedThread = ManagedThread (Weak ThreadId) (IORef Kill)
+
+data Kill
+    = Alive
+    | -- | Thrown by a thread of its own, filled once the exception is taken.
+      Killing (MVar ())
+    | -- | Whether it was killed.
+      Finishing Bool
 
 ----------------------------------------------------------------
 
@@ -156,7 +164,7 @@ takeReservation mgr rsv io = taking mgr rsv (return ()) $ \_ -> io
 --   thread which takes it gives it back, and so does a caller whose fork
 --   throws, and only one of them can have it.
 release :: ThreadManager -> Reservation -> IO ()
-release ThreadManager{..} (Reservation ref) = do
+release ThreadManager{..} (Reservation ref) = E.mask_ $ do
     taken <- atomicModifyIORef' ref (\b -> (True, b))
     unless taken $ atomically $ modifyTVar' reservedPlaces (subtract 1)
 
@@ -182,11 +190,9 @@ instance Exception KilledByThreadManager where
 withThreadManager :: Int -> (ThreadManager -> IO a) -> IO a
 withThreadManager cap action = do
     mgr <- newThreadManager
-    E.mask $ \restore -> do
-        r <- E.try $ restore $ action mgr
-        E.uninterruptibleMask_ $
-            stopAfter mgr (return ()) $ \_ -> void $ waitUntilAllGoneFor mgr cap
-        either (E.throwIO :: SomeException -> IO a) return r
+    stopAfterWithResult mgr (action mgr) $ \r -> do
+        void $ E.uninterruptibleMask_ $ waitUntilAllGoneFor mgr cap
+        either E.throwIO return r
 
 -- | Stopping the manager.
 --
@@ -242,18 +248,22 @@ stopAfterWithResult mgr@ThreadManager{..} action cleanup = do
         -- themselves out as they end, and 'managerStopped' is what keeps
         -- new ones from arriving.
         atomically $ writeTVar managerStopped True
-        -- Not interrupted: an exception landing in a 'throwTo' here used
-        -- to leave the rest of the threads alive for good.
-        E.uninterruptibleMask_ $ killAll mgr ma
+        killAll mgr ma
         cleanup ma
 
 -- | Killing every thread the manager has, telling them how the action
---   ended.
+--   ended.  This does not wait for the exceptions to be taken: a thread
+--   in a foreign call takes one only once the call returns, and the
+--   others are not to wait for it.  A thread killed before, by its timeout,
+--   which took the exception and carried on, is killed again.
 killAll :: ThreadManager -> Either SomeException a -> IO ()
 killAll ThreadManager{..} ma = do
     ths <- Map.elems <$> readTVarIO managedThreads
     let ex = KilledByThreadManager $ either Just (const Nothing) ma
-    forM_ ths $ \(ManagedThread wtid ref) -> lockAndKill wtid ref ex
+    forM_ ths $ \(ManagedThread wtid ref) -> killWith again wtid ref ex
+  where
+    again (Killing done) = isJust <$> tryReadMVar done
+    again _ = return False
 
 -- | Like 'stopAfter', but the threads are told rather than killed.
 --
@@ -274,7 +284,7 @@ stopAfterWithGrace mgr@ThreadManager{..} grace action cleanup =
         ma <- E.try $ unmask action
         atomically $ writeTVar managerStopped True
         -- Not interrupted, the wait being bounded by the grace: an
-        -- exception landing in it used to skip the last resort.
+        -- exception landing in it would skip the last resort.
         E.uninterruptibleMask_ $ do
             gone <- waitUntilAllGoneFor mgr grace
             unless gone $ killAll mgr ma
@@ -423,10 +433,7 @@ forkManagedTimeoutFinally mgr timmgr label io final =
     E.bracketOnError (reserveManaged mgr) (release mgr) $ \rsv ->
         void $ forkIO $
             managed mgr rsv label final $ \(_n, ManagedThread wtid ref) ->
-                -- Forked: the timeout action runs on the system timer
-                -- manager's thread, and 'throwTo' blocks until the target
-                -- can take it.
-                T.withHandle timmgr (void $ forkIO $ lockAndKill wtid ref ex) io
+                T.withHandle timmgr (killWith (const $ return False) wtid ref ex) io
   where
     ex = KilledByThreadManager Nothing
 
@@ -557,9 +564,29 @@ recorded
     -> ((Key, ManagedThread) -> IO ())
     -> IO ()
 recorded mgr final body =
-    E.handle ignore $
-        E.bracket (setup mgr) (mapM_ $ clear mgr) $ \mkey ->
-            mapM_ body mkey `E.finally` final
+    E.bracket (setup mgr) (mapM_ $ clear mgr) $ \mkey -> case mkey of
+        Nothing -> final
+        Just key@(_, ManagedThread _ ref) ->
+            (body key `E.finally` (finishing ref >> final))
+                `E.catch` \e@(KilledByThreadManager _) -> do
+                    -- Only a kill of this manager's ends the thread quietly.
+                    killed <- readIORef ref
+                    case killed of
+                        Finishing True -> return ()
+                        _ -> E.throwIO e
+
+-- | No kill is decided on from here, and one decided on before is waited
+--   for, taken and caught here.  'readMVar' is interruptible, so it
+--   arrives although this runs masked.
+finishing :: IORef Kill -> IO ()
+finishing ref = do
+    old <- atomicModifyIORef' ref $ \k -> case k of
+        Alive -> (Finishing False, k)
+        Killing _ -> (Finishing True, k)
+        Finishing _ -> (k, k)
+    case old of
+        Killing done -> readMVar done `E.catch` \(KilledByThreadManager _) -> return ()
+        _ -> return ()
 
 -- | Recording this thread, or 'Nothing' once the manager has stopped.
 setup
@@ -567,7 +594,7 @@ setup
     -> IO (Maybe (Key, ManagedThread))
 setup ThreadManager{..} = do
     (wtid, n) <- myWeakThreadId
-    ref <- newIORef False
+    ref <- newIORef Alive
     let ent = ManagedThread wtid ref
     -- asking to throw KilledByThreadManager to me
     atomically $ do
@@ -578,14 +605,32 @@ setup ThreadManager{..} = do
                 modifyTVar' managedThreads $ Map.insert n ent
                 return $ Just (n, ent)
 
-lockAndKill :: Exception e => Weak ThreadId -> IORef Bool -> e -> IO ()
-lockAndKill wtid ref e = do
-    alreadyLocked <- atomicModifyIORef' ref (\b -> (True, b)) -- try to lock
-    unless alreadyLocked $ do
-        mtid <- deRefWeak wtid
-        case mtid of
-            Nothing -> return ()
-            Just tid -> E.throwTo tid e
+-- | Killing a thread which is alive, or killed before when the first
+--   argument says so, from a thread of its own: 'throwTo' blocks until
+--   the target takes the exception, and the killer is not to wait for it.
+killWith
+    :: (Kill -> IO Bool) -> Weak ThreadId -> IORef Kill -> KilledByThreadManager -> IO ()
+killWith again wtid ref e = E.mask_ $ do
+    old <- readIORef ref
+    ok <- case old of
+        Alive -> return True
+        Finishing _ -> return False
+        k -> again k
+    when ok $ do
+        done <- newEmptyMVar
+        won <- atomicModifyIORef' ref $ \k -> case k of
+            Finishing _ -> (k, False)
+            _ | sameKill k old -> (Killing done, True)
+              | otherwise -> (k, False)
+        when won $
+            void $
+                forkIO $
+                    (deRefWeak wtid >>= mapM_ (`E.throwTo` e))
+                        `E.finally` putMVar done ()
+  where
+    sameKill Alive Alive = True
+    sameKill (Killing a) (Killing b) = a == b
+    sameKill _ _ = False
 
 clear
     :: ThreadManager
@@ -593,9 +638,6 @@ clear
     -> IO ()
 clear ThreadManager{..} (n, _) =
     atomically $ modifyTVar' managedThreads $ Map.delete n
-
-ignore :: KilledByThreadManager -> IO ()
-ignore (KilledByThreadManager _) = return ()
 
 -- | Wait until all managed threads are finished.
 --

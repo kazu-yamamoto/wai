@@ -1,6 +1,7 @@
 {-# LANGUAGE CPP #-}
 {-# LANGUAGE NumericUnderscores #-}
 {-# LANGUAGE RecordWildCards #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE StandaloneDeriving #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE NoMonoLocalBinds #-}
@@ -276,6 +277,48 @@ main = hspec $ do
             atomically (countManaged tm) `shouldReturn` 1
             waitUntilAllGone tm
             ref `refShouldBe` True
+
+        it "stops at once, a thread which cannot take the kill notwithstanding" $ do
+            tm <- newThreadManager
+            ready <- newEmptyMVar
+            release <- newEmptyMVar
+            forkManaged tm "masked" $
+                E.uninterruptibleMask_ $ putMVar ready () >> takeMVar release
+            takeMVar ready
+            m <- forkManagedWithResult tm "probe" $ threadDelay 10_000_000
+            t0 <- getMonotonicTimeNSec
+            stopAfter tm (return ()) $ \_ -> return ()
+            t1 <- getMonotonicTimeNSec
+            (t1 - t0) `shouldSatisfy` (< 500_000_000)
+            r <- atomically $ waitManagedSTM m
+            either (isJust . (E.fromException :: E.SomeException -> Maybe KilledByThreadManager)) (const False) r
+                `shouldBe` True
+            putMVar release ()
+
+        it "does not cut a cleanup short with its kill" $ do
+            tm <- newThreadManager
+            entered <- newEmptyMVar
+            ref <- freshRef
+            forkManagedFinally tm "probe" (return ()) $ do
+                putMVar entered ()
+                threadDelay 200_000
+                I.writeIORef ref True
+            takeMVar entered
+            stopAfter tm (return ()) $ \_ -> return ()
+            waitUntilAllGone tm
+            ref `refShouldBe` True
+
+        it "kills again a thread which took its timeout's kill and carried on" $ do
+            tm <- newThreadManager
+            m <- initialize 10_000
+            survived <- newEmptyMVar
+            forkManagedTimeout tm m "stubborn" $ \_ ->
+                threadDelay 10_000_000 `E.catch` \(_ :: KilledByThreadManager) -> do
+                    putMVar survived ()
+                    threadDelay 10_000_000
+            takeMVar survived
+            stopAfter tm (return ()) $ \_ -> return ()
+            waitUntilAllGoneFor tm 1_000_000 `shouldReturn` True
 
         -- A thread timed out while it cannot take the kill must not hold up
         -- the system timer manager, which every 'threadDelay' waits on.
