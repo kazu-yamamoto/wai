@@ -19,6 +19,7 @@
 module System.ThreadManager (
     ThreadManager,
     newThreadManager,
+    withThreadManager,
     stopAfter,
     stopAfterWithResult,
     stopAfterWithGrace,
@@ -165,6 +166,16 @@ data KilledByThreadManager = KilledByThreadManager (Maybe SomeException)
 instance Exception KilledByThreadManager where
     toException = E.asyncExceptionToException
     fromException = E.asyncExceptionFromException
+
+-- | Running an action with a manager of its own, which is stopped once the
+--   action is done, however it ends: the threads left are killed and waited
+--   for, as leaving the scope of @withAsync@ of the async package cancels.
+--
+-- @since 0.5.3
+withThreadManager :: (ThreadManager -> IO a) -> IO a
+withThreadManager action = do
+    mgr <- newThreadManager
+    stopAfter mgr (action mgr) $ \_ -> waitUntilAllGone mgr
 
 -- | Stopping the manager.
 --
