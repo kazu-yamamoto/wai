@@ -38,6 +38,12 @@ module System.ThreadManager (
     forkManagedTimeout,
     forkManagedTimeoutFinally,
 
+    -- * Results
+    Managed,
+    forkManagedWithResult,
+    waitManagedSTM,
+    pollManagedSTM,
+
     -- * Synchronization
     waitUntilAllGone,
     waitUntilAllGoneFor,
@@ -395,6 +401,50 @@ forkManagedTimeoutFinally mgr timmgr label io final =
                 T.withHandle timmgr (void $ forkIO $ lockAndKill wtid ref ex) io
   where
     ex = KilledByThreadManager Nothing
+
+----------------------------------------------------------------
+
+-- | A managed thread whose end can be waited for, as an @Async@ of the
+--   async package can: its result, or the exception it ended with.
+--
+-- @since 0.5.3
+newtype Managed a = Managed (TMVar (Either SomeException a))
+
+-- | Fork a managed thread whose end is kept for 'waitManagedSTM'.
+--
+--   Nothing it ends with is thrown on, so nothing is printed: what to do
+--   with it is the waiter's.  Being killed by the manager is an end like
+--   any other, and a thread the stopped manager does not run at all ends
+--   with 'KilledByThreadManager' too, so a waiter never waits for ever.
+--
+-- @since 0.5.3
+forkManagedWithResult :: ThreadManager -> String -> IO a -> IO (Managed a)
+forkManagedWithResult mgr label io = do
+    var <- newEmptyTMVarIO
+    let put = atomically . void . tryPutTMVar var
+    -- Masked but for the action, so that a kill cannot land between the
+    -- action's end and its being kept.
+    forkManagedUnmaskFinally
+        mgr
+        label
+        (\unmask -> E.try (unmask io) >>= put)
+        (put $ Left $ E.toException $ KilledByThreadManager Nothing)
+    return $ Managed var
+
+-- | Succeeding with how a thread of 'forkManagedWithResult' ended, once
+--   it has.
+--
+-- @since 0.5.3
+waitManagedSTM :: Managed a -> STM (Either SomeException a)
+waitManagedSTM (Managed var) = readTMVar var
+
+-- | How a thread of 'forkManagedWithResult' ended, if it has.
+--
+-- @since 0.5.3
+pollManagedSTM :: Managed a -> STM (Maybe (Either SomeException a))
+pollManagedSTM (Managed var) = tryReadTMVar var
+
+----------------------------------------------------------------
 
 -- | The body of a managed thread, under its own label, taking the place
 --   kept for it.
