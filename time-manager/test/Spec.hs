@@ -180,6 +180,15 @@ main = hspec $ do
                 (return ())
             tryTakeMVar stopped `shouldReturn` Just ()
 
+        it "runs the thread in the caller's masking state" $ do
+            tm <- newThreadManager
+            m0 <- forkManagedWithResult tm "probe" E.getMaskingState
+            m1 <- E.mask_ $ forkManagedWithResult tm "probe" E.getMaskingState
+            r0 <- atomically $ waitManagedSTM m0
+            r1 <- atomically $ waitManagedSTM m1
+            either (const Nothing) Just r0 `shouldBe` Just E.Unmasked
+            either (const Nothing) Just r1 `shouldBe` Just E.MaskedInterruptible
+
         it "tells the thread it runs on" $ do
             tm <- newThreadManager
             var <- newEmptyMVar
