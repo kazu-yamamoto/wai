@@ -107,37 +107,37 @@ packages:
     commit: ee8038f7b4603f633f271b26b58328ae9382caa3
     git: https://github.com/kazu-yamamoto/http-semantics
 - completed:
-    commit: ff039bdb8e8d196579ef76be26d25710ab0ce1c0
+    commit: 04d87894640a9d4c67aa483d54f704033fc04f3f
     git: https://github.com/kazu-yamamoto/http2
     name: http2
     pantry-tree:
-      sha256: 87dc3c13d64f821cb0e47db4ba42097d234bec865296f5c4d32029dce96bbb17
+      sha256: 7878257ea569d2160268aa4627a2211d69576202a7354c5934690db134c3f61d
       size: 52639
     version: 5.4.14
   original:
-    commit: ff039bdb8e8d196579ef76be26d25710ab0ce1c0
+    commit: 04d87894640a9d4c67aa483d54f704033fc04f3f
     git: https://github.com/kazu-yamamoto/http2
 - completed:
-    commit: b54ace2221e906df633c0b32d02cbd36284b5748
+    commit: 78886792ad481fdb54acc7f8ee3d4dbdfb03cebc
     git: https://github.com/kazu-yamamoto/quic
     name: quic
     pantry-tree:
-      sha256: 51d51db5abd0c2a598e98466e558a5830fa053290d075790ad5ed3ee8d7e555e
+      sha256: 88bc68aec9d59504e1d6947afa86c5c46af79c173cbfdfaf6c642ac9dfbfc72b
       size: 8715
     version: 0.3.24
   original:
-    commit: b54ace2221e906df633c0b32d02cbd36284b5748
+    commit: 78886792ad481fdb54acc7f8ee3d4dbdfb03cebc
     git: https://github.com/kazu-yamamoto/quic
 - completed:
-    commit: 908339eb84c13688df44f15b0b428f5aae39a7be
+    commit: 93df4c26794b6f01353e849ffd4d84a17f11a78f
     git: https://github.com/kazu-yamamoto/http3
     name: http3
     pantry-tree:
-      sha256: 47696704e0282e5dfd27855314b8a45593d46687c44a039756e89fbef3a335b3
+      sha256: 98dada0a92d3edd19348cfdaa4bc1cad8db436ba210b555cb6f72794bc061931
       size: 53637
     version: 0.1.12
   original:
-    commit: 908339eb84c13688df44f15b0b428f5aae39a7be
+    commit: 93df4c26794b6f01353e849ffd4d84a17f11a78f
     git: https://github.com/kazu-yamamoto/http3
 - completed:
     hackage: mlkem-0.2.2.0@sha256:c16cb61190e915593767e716dd08957607f6045a01d7c3a1313fbd74eb31c75d,4759
