@@ -41,6 +41,7 @@ module System.ThreadManager (
     -- * Results
     Managed,
     forkManagedWithResult,
+    managedThreadId,
     waitManagedSTM,
     pollManagedSTM,
 
@@ -408,7 +409,7 @@ forkManagedTimeoutFinally mgr timmgr label io final =
 --   async package can: its result, or the exception it ended with.
 --
 -- @since 0.5.3
-newtype Managed a = Managed (TMVar (Either SomeException a))
+data Managed a = Managed ThreadId (TMVar (Either SomeException a))
 
 -- | Fork a managed thread whose end is kept for 'waitManagedSTM'.
 --
@@ -424,25 +425,35 @@ forkManagedWithResult mgr label io = do
     let put = atomically . void . tryPutTMVar var
     -- Masked but for the action, so that a kill cannot land between the
     -- action's end and its being kept.
-    forkManagedUnmaskFinally
-        mgr
-        label
-        (\unmask -> E.try (unmask io) >>= put)
-        (put $ Left $ E.toException $ KilledByThreadManager Nothing)
-    return $ Managed var
+    tid <-
+        E.mask_ $
+            forkManagedByFinally
+                mgr
+                forkIOWithUnmask
+                label
+                (\unmask -> E.try (unmask io) >>= put)
+                (put $ Left $ E.toException $ KilledByThreadManager Nothing)
+    return $ Managed tid var
+
+-- | The thread of 'forkManagedWithResult', as for a last resort of the
+--   caller's own.
+--
+-- @since 0.5.3
+managedThreadId :: Managed a -> ThreadId
+managedThreadId (Managed tid _) = tid
 
 -- | Succeeding with how a thread of 'forkManagedWithResult' ended, once
 --   it has.
 --
 -- @since 0.5.3
 waitManagedSTM :: Managed a -> STM (Either SomeException a)
-waitManagedSTM (Managed var) = readTMVar var
+waitManagedSTM (Managed _ var) = readTMVar var
 
 -- | How a thread of 'forkManagedWithResult' ended, if it has.
 --
 -- @since 0.5.3
 pollManagedSTM :: Managed a -> STM (Maybe (Either SomeException a))
-pollManagedSTM (Managed var) = tryReadTMVar var
+pollManagedSTM (Managed _ var) = tryReadTMVar var
 
 ----------------------------------------------------------------
 
