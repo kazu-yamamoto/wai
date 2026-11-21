@@ -72,6 +72,7 @@ import Data.IORef (IORef, atomicModifyIORef', newIORef)
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import Data.Word (Word64)
+import Foreign.StablePtr (freeStablePtr, newStablePtr)
 import GHC.Conc.Sync (labelThread)
 #if __GLASGOW_HASKELL__ >= 908
 import GHC.Conc.Sync (fromThreadId)
@@ -454,9 +455,16 @@ forkManagedWithResult mgr label io = do
                 mgr
                 (\body -> forkIO $ body restore)
                 label
-                (\restore' -> E.try (restore' io) >>= put)
+                (\restore' -> rooted $ E.try (restore' io) >>= put)
                 (put $ Left $ E.toException $ KilledByThreadManager Nothing)
     return $ Managed tid var
+
+-- | Running with this thread a root of the garbage collector, so that it
+--   is never taken for one blocked indefinitely, nor is a thread waiting
+--   for it: the manager stops it.  A group of them whose wake-up became
+--   unreachable as a connection closed was told so, waiter and all.
+rooted :: IO a -> IO a
+rooted io = E.bracket (myThreadId >>= newStablePtr) freeStablePtr $ \_ -> io
 
 -- | The thread of 'forkManagedWithResult', as for a last resort of the
 --   caller's own.
@@ -494,11 +502,10 @@ waitEitherManaged a b = waiting $ waitEitherManagedSTM a b
 -- | Waiting for threads of 'forkManagedWithResult', again if told that the
 --   wait is blocked indefinitely.  Once nothing that could wake the threads
 --   is reachable, the run-time system throws that to them and to whoever
---   waits for them at once, but they then end and say so.  Not only once,
---   as async does: a connection closing can tell a waiter again before its
---   threads have ended, and the manager stopping ends a wait that never would.
+--   waits for them at once, but they then end and say so.  Once, as async
+--   does: again and again is a loop of collections for the run-time system.
 waiting :: STM a -> IO a
-waiting stm = atomically stm `E.catch` \E.BlockedIndefinitelyOnSTM -> waiting stm
+waiting stm = atomically stm `E.catch` \E.BlockedIndefinitelyOnSTM -> atomically stm
 
 -- | The first of two threads of 'forkManagedWithResult' to end, its
 --   exception thrown on, as @waitEitherSTM@ of the async package.
