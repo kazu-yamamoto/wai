@@ -159,17 +159,18 @@ main = hspec $ do
             r <- E.try $ concurrentlyManaged_ "a" (threadDelay 10_000_000) "b" (throwIO $ userError "b")
             either (\e -> show (e :: E.SomeException)) (const "") r `shouldBe` show (userError "b")
 
-        it "waits again when told that the wait is blocked indefinitely" $ do
-            -- Nothing can wake the thread "a" waits on, so the run-time
-            -- system tells it, and its waiter, at once; "a" then ends.
-            res <- newEmptyMVar
-            let stuck =
-                    (STM.newEmptyTMVarIO >>= atomically . STM.takeTMVar)
-                        `E.catch` \E.BlockedIndefinitelyOnSTM -> return ()
-            _ <- forkIO $ E.try (concurrentlyManaged_ "a" stuck "b" (return ())) >>= putMVar res
-            _ <- forkIO $ forM_ [1 .. 20 :: Int] $ \_ -> threadDelay 50_000 >> performGC
-            r <- Timeout.timeout 3_000_000 $ takeMVar res
-            fmap (either (\e -> show (e :: E.SomeException)) (const "done")) r `shouldBe` Just "done"
+        it "is not taken for a thread blocked indefinitely, and is stopped by its manager" $ do
+            -- Nothing can wake it, but it is the manager's to stop, not the
+            -- run-time system's: a group of them, waiter and all, was told
+            -- so as a connection closed.
+            tm <- newThreadManager
+            m <- forkManagedWithResult tm "probe" $ STM.newEmptyTMVarIO >>= atomically . STM.takeTMVar
+            forM_ [1 .. 5 :: Int] $ \_ -> threadDelay 20_000 >> performGC
+            atomically (isNothing <$> pollManagedSTM m) `shouldReturn` True
+            stopAfter tm (return ()) $ \_ -> return ()
+            r <- Timeout.timeout 1_000_000 $ atomically $ waitManagedSTM m
+            fmap (either (isJust . (E.fromException :: E.SomeException -> Maybe KilledByThreadManager)) (const False)) r
+                `shouldBe` Just True
 
         it "ends with the first with raceManaged_, and stops the other" $ do
             stopped <- newEmptyMVar
