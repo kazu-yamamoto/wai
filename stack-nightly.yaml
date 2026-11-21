@@ -23,7 +23,7 @@ nix:
     - fcgi
     - zlib
 extra-deps:
-  - tls-2.6.0
+  - tls-2.6.2
   - tls-session-manager-0.1.2@rev:1
   - hpke-0.4.0
   - ech-config-0.0.2
@@ -38,11 +38,11 @@ extra-deps:
   - git: https://github.com/kazu-yamamoto/http-semantics
     commit: ee8038f7b4603f633f271b26b58328ae9382caa3
   - git: https://github.com/kazu-yamamoto/http2
-    commit: ae94d4122691bda919d735990ab1ee5d45bde52f
+    commit: ff039bdb8e8d196579ef76be26d25710ab0ce1c0
   - git: https://github.com/kazu-yamamoto/quic
-    commit: 9528eac2f9a4e79f201af562f9a5d5d8f38f8475
+    commit: b54ace2221e906df633c0b32d02cbd36284b5748
   - git: https://github.com/kazu-yamamoto/http3
-    commit: 401d35b4137caee8e7077cbd9e3269f743da4774
+    commit: 908339eb84c13688df44f15b0b428f5aae39a7be
   - crypton-2.2.7
   - crypto-token-0.2.1
 allow-newer: true

@@ -38,7 +38,7 @@ extra-deps:
   - git: https://github.com/kazu-yamamoto/http-semantics
     commit: ee8038f7b4603f633f271b26b58328ae9382caa3
   - git: https://github.com/kazu-yamamoto/http2
-    commit: ae94d4122691bda919d735990ab1ee5d45bde52f
+    commit: ff039bdb8e8d196579ef76be26d25710ab0ce1c0
   - mwc-random-0.15.2.0
   - network-3.2.14.0
   - network-control-0.2.0
