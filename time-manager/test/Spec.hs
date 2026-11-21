@@ -19,6 +19,7 @@ import qualified GHC.Event as EV
 import Control.Concurrent (
     MVar,
     forkIO,
+    myThreadId,
     newEmptyMVar,
     putMVar,
     takeMVar,
@@ -54,6 +55,7 @@ import System.ThreadManager (
     forkManagedTimeoutFinally,
     forkManagedUnmaskFinally,
     forkManagedWithResult,
+    managedThreadId,
     newThreadManager,
     pollManagedSTM,
     reserveManaged,
@@ -137,6 +139,12 @@ main = hspec $ do
             m <- forkManagedWithResult tm "probe" $ throwIO (userError "boom") >> return ()
             r <- atomically $ waitManagedSTM m
             either (\e -> show e) (const "") r `shouldBe` show (userError "boom")
+
+        it "tells the thread it runs on" $ do
+            tm <- newThreadManager
+            var <- newEmptyMVar
+            m <- forkManagedWithResult tm "probe" $ myThreadId >>= putMVar var
+            takeMVar var `shouldReturn` managedThreadId m
 
         it "tells nothing before the thread has ended" $ do
             tm <- newThreadManager
