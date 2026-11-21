@@ -46,6 +46,7 @@ module System.ThreadManager (
     waitManagedSTM,
     pollManagedSTM,
     waitManaged,
+    waitEitherManaged,
     waitEitherManagedSTM,
     concurrentlyManaged_,
     raceManaged_,
@@ -475,7 +476,20 @@ pollManagedSTM (Managed _ var) = tryReadTMVar var
 --
 -- @since 0.5.3
 waitManaged :: Managed a -> IO a
-waitManaged m = atomically (waitManagedSTM m) >>= either E.throwIO return
+waitManaged m = waiting (waitManagedSTM m) >>= either E.throwIO return
+
+-- | 'waitEitherManagedSTM' in 'IO', waiting as 'waitManaged' does.
+--
+-- @since 0.5.3
+waitEitherManaged :: Managed a -> Managed b -> IO (Either a b)
+waitEitherManaged a b = waiting $ waitEitherManagedSTM a b
+
+-- | Waiting for threads of 'forkManagedWithResult', again if told that the
+--   wait is blocked indefinitely.  Once nothing that could wake the threads
+--   is reachable, the run-time system throws that to them and to whoever
+--   waits for them at once, but they then end and say so; as async does.
+waiting :: STM a -> IO a
+waiting stm = atomically stm `E.catch` \E.BlockedIndefinitelyOnSTM -> waiting stm
 
 -- | The first of two threads of 'forkManagedWithResult' to end, its
 --   exception thrown on, as @waitEitherSTM@ of the async package.
@@ -496,7 +510,7 @@ concurrentlyManaged_ :: String -> IO a -> String -> IO b -> IO ()
 concurrentlyManaged_ l1 io1 l2 io2 = withThreadManager $ \mgr -> do
     a <- forkManagedWithResult mgr l1 io1
     b <- forkManagedWithResult mgr l2 io2
-    r <- atomically $ waitEitherManagedSTM a b
+    r <- waitEitherManaged a b
     either (\_ -> void $ waitManaged b) (\_ -> void $ waitManaged a) r
 
 -- | Running two actions side by side until either has ended, as @race_@
@@ -508,7 +522,7 @@ raceManaged_ :: String -> IO a -> String -> IO b -> IO ()
 raceManaged_ l1 io1 l2 io2 = withThreadManager $ \mgr -> do
     a <- forkManagedWithResult mgr l1 io1
     b <- forkManagedWithResult mgr l2 io2
-    void $ atomically $ waitEitherManagedSTM a b
+    void $ waitEitherManaged a b
 
 ----------------------------------------------------------------
 
