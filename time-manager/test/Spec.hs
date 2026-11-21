@@ -25,6 +25,7 @@ import Control.Concurrent (
     takeMVar,
     threadDelay,
     tryPutMVar,
+    tryTakeMVar,
     yield,
  )
 import Control.Concurrent.STM (atomically, newTVarIO, readTVar, writeTVar)
@@ -54,8 +55,10 @@ import System.ThreadManager (
     forkManagedTimeout,
     forkManagedTimeoutFinally,
     forkManagedUnmaskFinally,
+    concurrentlyManaged_,
     forkManagedWithResult,
     managedThreadId,
+    raceManaged_,
     newThreadManager,
     pollManagedSTM,
     reserveManaged,
@@ -147,6 +150,22 @@ main = hspec $ do
             r <- atomically $ pollManagedSTM m
             fmap (either (isJust . (E.fromException :: E.SomeException -> Maybe KilledByThreadManager)) (const False)) r
                 `shouldBe` Just True
+
+        it "waits for both with concurrentlyManaged_, and throws the first exception" $ do
+            done <- newEmptyMVar
+            concurrentlyManaged_ "a" (threadDelay 50_000 >> putMVar done ()) "b" (return ())
+            tryTakeMVar done `shouldReturn` Just ()
+            r <- E.try $ concurrentlyManaged_ "a" (threadDelay 10_000_000) "b" (throwIO $ userError "b")
+            either (\e -> show (e :: E.SomeException)) (const "") r `shouldBe` show (userError "b")
+
+        it "ends with the first with raceManaged_, and stops the other" $ do
+            stopped <- newEmptyMVar
+            raceManaged_
+                "a"
+                (threadDelay 10_000_000 `E.onException` putMVar stopped ())
+                "b"
+                (return ())
+            tryTakeMVar stopped `shouldReturn` Just ()
 
         it "tells the thread it runs on" $ do
             tm <- newThreadManager
