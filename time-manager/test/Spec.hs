@@ -62,6 +62,7 @@ import System.ThreadManager (
     stopAfter,
     stopAfterWithGrace,
     takeReservation,
+    withThreadManager,
     waitManagedSTM,
     waitStoppingSTM,
     waitUntilAllGone,
@@ -139,6 +140,13 @@ main = hspec $ do
             m <- forkManagedWithResult tm "probe" $ throwIO (userError "boom") >> return ()
             r <- atomically $ waitManagedSTM m
             either (\e -> show e) (const "") r `shouldBe` show (userError "boom")
+
+        it "is stopped with the scope of withThreadManager" $ do
+            m <- withThreadManager $ \tm -> forkManagedWithResult tm "probe" $ threadDelay 10_000_000
+            -- Killed and waited for by then.
+            r <- atomically $ pollManagedSTM m
+            fmap (either (isJust . (E.fromException :: E.SomeException -> Maybe KilledByThreadManager)) (const False)) r
+                `shouldBe` Just True
 
         it "tells the thread it runs on" $ do
             tm <- newThreadManager
