@@ -48,8 +48,6 @@ module System.ThreadManager (
     waitManaged,
     waitEitherManaged,
     waitEitherManagedSTM,
-    concurrentlyManaged_,
-    raceManaged_,
 
     -- * Synchronization
     waitUntilAllGone,
@@ -72,7 +70,6 @@ import Data.IORef (IORef, atomicModifyIORef', newIORef)
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import Data.Word (Word64)
-import Foreign.StablePtr (freeStablePtr, newStablePtr)
 import GHC.Conc.Sync (labelThread)
 #if __GLASGOW_HASKELL__ >= 908
 import GHC.Conc.Sync (fromThreadId)
@@ -174,19 +171,21 @@ instance Exception KilledByThreadManager where
     fromException = E.asyncExceptionFromException
 
 -- | Running an action with a manager of its own, which is stopped once the
---   action is done, however it ends: the threads left are killed and waited
---   for, as leaving the scope of @withAsync@ of the async package cancels.
+--   action is done, however it ends: the threads left are killed, as the
+--   last resort, and waited for for at most this many microseconds.  A
+--   thread which does not end by then is left, still counted.
+--
+--   Threads which should end by themselves first are told with
+--   'waitStoppingSTM' before, by the caller: this kills at once.
 --
 -- @since 0.5.3
-withThreadManager :: (ThreadManager -> IO a) -> IO a
-withThreadManager action = do
+withThreadManager :: Int -> (ThreadManager -> IO a) -> IO a
+withThreadManager cap action = do
     mgr <- newThreadManager
-    -- Stopped and waited for uninterruptibly, as async's
-    -- 'uninterruptibleCancel', so that nothing is left behind.
     E.mask $ \restore -> do
         r <- E.try $ restore $ action mgr
         E.uninterruptibleMask_ $
-            stopAfter mgr (return ()) $ \_ -> waitUntilAllGone mgr
+            stopAfter mgr (return ()) $ \_ -> void $ waitUntilAllGoneFor mgr cap
         either (E.throwIO :: SomeException -> IO a) return r
 
 -- | Stopping the manager.
@@ -243,7 +242,9 @@ stopAfterWithResult mgr@ThreadManager{..} action cleanup = do
         -- themselves out as they end, and 'managerStopped' is what keeps
         -- new ones from arriving.
         atomically $ writeTVar managerStopped True
-        killAll mgr ma
+        -- Not interrupted: an exception landing in a 'throwTo' here used
+        -- to leave the rest of the threads alive for good.
+        E.uninterruptibleMask_ $ killAll mgr ma
         cleanup ma
 
 -- | Killing every thread the manager has, telling them how the action
@@ -272,8 +273,11 @@ stopAfterWithGrace mgr@ThreadManager{..} grace action cleanup =
     E.mask $ \unmask -> do
         ma <- E.try $ unmask action
         atomically $ writeTVar managerStopped True
-        gone <- waitUntilAllGoneFor mgr grace
-        unless gone $ killAll mgr ma
+        -- Not interrupted, the wait being bounded by the grace: an
+        -- exception landing in it used to skip the last resort.
+        E.uninterruptibleMask_ $ do
+            gone <- waitUntilAllGoneFor mgr grace
+            unless gone $ killAll mgr ma
         cleanup $ either Just (const Nothing) ma
         either E.throwIO return ma
 
@@ -455,16 +459,9 @@ forkManagedWithResult mgr label io = do
                 mgr
                 (\body -> forkIO $ body restore)
                 label
-                (\restore' -> rooted $ E.try (restore' io) >>= put)
+                (\restore' -> E.try (restore' io) >>= put)
                 (put $ Left $ E.toException $ KilledByThreadManager Nothing)
     return $ Managed tid var
-
--- | Running with this thread a root of the garbage collector, so that it
---   is never taken for one blocked indefinitely, nor is a thread waiting
---   for it: the manager stops it.  A group of them whose wake-up became
---   unreachable as a connection closed was told so, waiter and all.
-rooted :: IO a -> IO a
-rooted io = E.bracket (myThreadId >>= newStablePtr) freeStablePtr $ \_ -> io
 
 -- | The thread of 'forkManagedWithResult', as for a last resort of the
 --   caller's own.
@@ -515,30 +512,6 @@ waitEitherManagedSTM :: Managed a -> Managed b -> STM (Either a b)
 waitEitherManagedSTM a b =
     (Left <$> (waitManagedSTM a >>= either throwSTM return))
         `orElse` (Right <$> (waitManagedSTM b >>= either throwSTM return))
-
--- | Running two actions side by side until both have ended, as
---   @concurrently_@ of the async package: the first exception is thrown
---   on.  They are threads of a manager stopped with the scope
---   ('withThreadManager'), under the names given.
---
--- @since 0.5.3
-concurrentlyManaged_ :: String -> IO a -> String -> IO b -> IO ()
-concurrentlyManaged_ l1 io1 l2 io2 = withThreadManager $ \mgr -> do
-    a <- forkManagedWithResult mgr l1 io1
-    b <- forkManagedWithResult mgr l2 io2
-    r <- waitEitherManaged a b
-    either (\_ -> void $ waitManaged b) (\_ -> void $ waitManaged a) r
-
--- | Running two actions side by side until either has ended, as @race_@
---   of the async package: an exception it ended with is thrown on, and
---   the other is stopped with the scope ('withThreadManager').
---
--- @since 0.5.3
-raceManaged_ :: String -> IO a -> String -> IO b -> IO ()
-raceManaged_ l1 io1 l2 io2 = withThreadManager $ \mgr -> do
-    a <- forkManagedWithResult mgr l1 io1
-    b <- forkManagedWithResult mgr l2 io2
-    void $ waitEitherManaged a b
 
 ----------------------------------------------------------------
 

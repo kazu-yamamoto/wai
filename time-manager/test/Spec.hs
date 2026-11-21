@@ -25,7 +25,6 @@ import Control.Concurrent (
     takeMVar,
     threadDelay,
     tryPutMVar,
-    tryTakeMVar,
     yield,
  )
 import Control.Concurrent.STM (atomically, newTVarIO, readTVar, writeTVar)
@@ -34,7 +33,6 @@ import Control.Exception (AssertionFailed (..), finally, throwIO)
 import qualified Control.Exception as E
 import Control.Monad (forM_, unless, void, when)
 import Data.Maybe (isJust, isNothing)
-import System.Mem (performGC)
 import Data.IORef as I (
     IORef,
     atomicModifyIORef',
@@ -56,10 +54,8 @@ import System.ThreadManager (
     forkManagedTimeout,
     forkManagedTimeoutFinally,
     forkManagedUnmaskFinally,
-    concurrentlyManaged_,
     forkManagedWithResult,
     managedThreadId,
-    raceManaged_,
     newThreadManager,
     pollManagedSTM,
     reserveManaged,
@@ -145,41 +141,20 @@ main = hspec $ do
             r <- atomically $ waitManagedSTM m
             either (\e -> show e) (const "") r `shouldBe` show (userError "boom")
 
+        it "gives up waiting for a thread which swallows the kill, after the cap" $ do
+            t0 <- getMonotonicTimeNSec
+            withThreadManager 200_000 $ \tm ->
+                void $ forkManagedWithResult tm "probe" $
+                    E.uninterruptibleMask_ (threadDelay 2_000_000)
+            t1 <- getMonotonicTimeNSec
+            (t1 - t0) `shouldSatisfy` (< 1_500_000_000)
+
         it "is stopped with the scope of withThreadManager" $ do
-            m <- withThreadManager $ \tm -> forkManagedWithResult tm "probe" $ threadDelay 10_000_000
+            m <- withThreadManager 1_000_000 $ \tm -> forkManagedWithResult tm "probe" $ threadDelay 10_000_000
             -- Killed and waited for by then.
             r <- atomically $ pollManagedSTM m
             fmap (either (isJust . (E.fromException :: E.SomeException -> Maybe KilledByThreadManager)) (const False)) r
                 `shouldBe` Just True
-
-        it "waits for both with concurrentlyManaged_, and throws the first exception" $ do
-            done <- newEmptyMVar
-            concurrentlyManaged_ "a" (threadDelay 50_000 >> putMVar done ()) "b" (return ())
-            tryTakeMVar done `shouldReturn` Just ()
-            r <- E.try $ concurrentlyManaged_ "a" (threadDelay 10_000_000) "b" (throwIO $ userError "b")
-            either (\e -> show (e :: E.SomeException)) (const "") r `shouldBe` show (userError "b")
-
-        it "is not taken for a thread blocked indefinitely, and is stopped by its manager" $ do
-            -- Nothing can wake it, but it is the manager's to stop, not the
-            -- run-time system's: a group of them, waiter and all, was told
-            -- so as a connection closed.
-            tm <- newThreadManager
-            m <- forkManagedWithResult tm "probe" $ STM.newEmptyTMVarIO >>= atomically . STM.takeTMVar
-            forM_ [1 .. 5 :: Int] $ \_ -> threadDelay 20_000 >> performGC
-            atomically (isNothing <$> pollManagedSTM m) `shouldReturn` True
-            stopAfter tm (return ()) $ \_ -> return ()
-            r <- Timeout.timeout 1_000_000 $ atomically $ waitManagedSTM m
-            fmap (either (isJust . (E.fromException :: E.SomeException -> Maybe KilledByThreadManager)) (const False)) r
-                `shouldBe` Just True
-
-        it "ends with the first with raceManaged_, and stops the other" $ do
-            stopped <- newEmptyMVar
-            raceManaged_
-                "a"
-                (threadDelay 10_000_000 `E.onException` putMVar stopped ())
-                "b"
-                (return ())
-            tryTakeMVar stopped `shouldReturn` Just ()
 
         it "runs the thread in the caller's masking state" $ do
             tm <- newThreadManager
