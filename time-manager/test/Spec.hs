@@ -93,11 +93,11 @@ main = hspec $ do
             stopAfter tm (return ()) $ \_ -> return ()
             ran <- freshRef
             escaped <- freshRef
-            before <- getUncaughtExceptionHandler
+            handler0 <- getUncaughtExceptionHandler
             setUncaughtExceptionHandler $ \_ -> I.writeIORef escaped True
             forkManagedTimeout tm defaultManager "probe" $ \_ -> I.writeIORef ran True
             threadDelay 200_000
-            setUncaughtExceptionHandler before
+            setUncaughtExceptionHandler handler0
             ran `refShouldBe` False
             escaped `refShouldBe` False
 
@@ -460,11 +460,11 @@ itLetsTheExceptionOutOf name fork =
         tm <- newThreadManager
         escaped <- newEmptyMVar
         cleaned <- freshRef
-        before <- getUncaughtExceptionHandler
+        handler0 <- getUncaughtExceptionHandler
         setUncaughtExceptionHandler $ \_ -> void $ tryPutMVar escaped ()
         fork tm "probe" (throwIO $ userError "probe") (I.writeIORef cleaned True)
         out <- ranWithin 500_000 escaped
-        setUncaughtExceptionHandler before
+        setUncaughtExceptionHandler handler0
         out `shouldBe` True
         cleaned `refShouldBe` True
 
