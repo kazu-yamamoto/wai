@@ -9,12 +9,12 @@ module Network.Wai.Handler.Warp.HTTP2 (
     http2server,
 ) where
 
-import Control.Concurrent.STM (atomically, check, writeTVar)
+import Control.Concurrent.STM (atomically, check, orElse, writeTVar)
 import qualified Control.Exception as E
+import qualified Data.ByteString as BS
 import Data.IORef (readIORef)
 import qualified Data.IORef as I
 import GHC.Conc.Sync (labelThread, myThreadId)
-import qualified Network.HTTP2.Client as H2C
 import qualified Network.HTTP2.Frame as H2
 import qualified Network.HTTP2.Server as H2
 import Network.Socket (SockAddr)
@@ -70,14 +70,21 @@ http2 settings ii conn cc transport app peersa _th bs = do
         sendBS = connSendAll conn
         -- The http2 library says what to give up on through
         -- 'connSendGiveUp', which the sends of the connection read.
-        sendBSWith giveUp frame = do
+        sendBSWith frame giveUp = do
             atomically $ writeTVar (connSendGiveUp cc) giveUp
             (Right <$> sendBS frame) `E.catch` \T.TimeoutThread -> return (Left ())
         -- And what a read gives up on through 'connRecvGiveUp', so that
-        -- the receiver is stopped without being interrupted.
-        recvNWith giveUp n = do
+        -- the receiver is stopped without being interrupted.  A short read
+        -- is a give-up if the action has fired, and the end of input, the
+        -- empty string, if not: its bytes were taken for a whole frame header.
+        recvNWith n giveUp = do
             atomically $ writeTVar (connRecvGiveUp cc) giveUp
-            recvN n
+            r <- recvN n
+            if BS.length r == n
+                then return $ Right r
+                else do
+                    gaveUp <- atomically $ (True <$ giveUp) `orElse` return False
+                    return $ if gaveUp then Left () else Right BS.empty
         conf =
             H2.defaultConfig
                 { H2.confWriteBuffer = bufBuffer writeBuffer
@@ -98,15 +105,9 @@ http2 settings ii conn cc transport app peersa _th bs = do
     when ok $ do
         -- The connection is the http2 library's from here.
         handOver $ connWatchdog cc
-        endedNormally $
-            runH2 settings conf $
-                http2server "Warp HTTP/2" settings ii transport peersa app
+        runH2 settings conf $
+            http2server "Warp HTTP/2" settings ii transport peersa app
   where
-    -- http2 ends a connection which has run its course with
-    -- 'ConnectionIsClosed', which is no exception to report.
-    endedNormally = E.handle $ \e -> case e of
-        H2C.ConnectionIsClosed -> return ()
-        _ -> E.throwIO e
     -- A GOAWAY ends the connection, so there is nothing left to serve
     -- on it.
     checkTLS = case transport of
@@ -140,7 +141,7 @@ http2server
 http2server label settings ii transport addr app h2req0 aux0 response = do
     tid <- myThreadId
     labelThread tid (label ++ " http2server " ++ show addr)
-    req0 <- toWAIRequest h2req0 aux0
+    req0 <- toWAIRequest h2req0
 #if HAS_EARLY_HINTS_SUPPORT
     let req = req0{requestSendEarlyHints = H2.auxSendInformational aux0 (H.mkStatus 103 "Early Hints")}
 #else
@@ -180,12 +181,13 @@ http2server label settings ii transport addr app h2req0 aux0 response = do
                         logSent (h2rsp, [], responseStatus ersp)
     return ()
   where
-    toWAIRequest h2req aux = toRequest ii settings addr hdr bdylen bdy th transport
+    toWAIRequest h2req = toRequest ii settings addr hdr bdylen bdy th transport
       where
         !hdr = H2.requestHeaders h2req
         !bdy = H2.getRequestBodyChunk h2req
         !bdylen = H2.requestBodySize h2req
-        !th = H2.auxTimeHandle aux
+        -- http2 supervises the connection, not each request.
+        !th = T.emptyHandle
 
     logResponse = S.settingsLogger settings
 
