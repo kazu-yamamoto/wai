@@ -83,10 +83,8 @@ import GHC.IO.Exception (IOErrorType (..))
 import Network.Socket (
     SockAddr,
     Socket,
-    getSocketName,
-#if !MIN_VERSION_network(3,1,1) || !MIN_VERSION_warp(3,4,18)
     close,
-#endif
+    getSocketName,
 #if MIN_VERSION_network(3,1,1)
     gracefulClose,
 #endif
@@ -97,7 +95,10 @@ import Network.Socket (
 import Network.Socket (unsafeGracefulClose)
 #endif
 import Network.Socket.BufferPool
-import Network.Socket.ByteString (recvWith, sendAll, sendAllWith)
+import Network.Socket.ByteString (recvWith, sendAllWith)
+#if !MIN_VERSION_warp(3,5,0)
+import Network.Socket.ByteString (sendAll)
+#endif
 import qualified Network.TLS as TLS
 import qualified Network.TLS.SessionManager as SM
 import Network.Wai (Application)
@@ -404,8 +405,14 @@ mkConn
 -- Warp starts this connection's watchdog before it calls this, so the
 -- handshake is supervised like the rest of the connection, and the first
 -- read gives up by itself once the watchdog decides it timed out.
-mkConn tlsset set cc s params = do
-    ebs <- recvFirstBS $ timedOutSTM $ connWatchdog cc
+mkConn tlsset set cc s params = (`E.onException` unsafeClose s) $ do
+    -- The socket is closed on any way out but a connection: Warp's
+    -- bracket does not have it until this has returned.  A client that
+    -- connected and sent nothing used to leave it open until GC.
+    -- Given up on once the server is shutting down, as warp's reads are:
+    -- a client which connected and said nothing is not waited for.  Both
+    -- ends are quiet ones, which warp does not display.
+    ebs <- recvFirstBS $ timedOutSTM (connWatchdog cc) <|> shuttingDown
     case ebs of
       Left () -> throwIO TimeoutThread
       Right bs -> switch bs
@@ -422,6 +429,9 @@ mkConn tlsset set s params = do
       Right bs -> switch bs
 #endif
   where
+#if MIN_VERSION_warp(3,5,0)
+    shuttingDown = maybe retry (\ss -> currentShuttingDownStateSTM ss >>= check) $ getServerState set
+#endif
     recvFirstBS giveUp =
         (recvWith s 4096 giveUp `E.catch` resetIsEOF)
             `onException` unsafeClose s
@@ -490,10 +500,12 @@ httpOverTls TLSSettings{..} set s bs0 params =
 #endif
         rawRecvN <- makeRecvN bs0 recv
         let recvN = wrappedRecvN rawRecvN
+        -- Whether ALPN chose HTTP/2, for how long a close waits for FIN.
+        h2 <- I.newIORef False
 #if MIN_VERSION_warp(3,5,0) && MIN_VERSION_tls(2,6,0)
-        ctx <- TLS.contextNew (GivingUpBackend (backend send recvN) (recvNWith recvN)) params
+        ctx <- TLS.contextNew (GivingUpBackend (backend h2 send recvN) (recvNWith recvN)) params
 #else
-        ctx <- TLS.contextNew (backend send recvN) params
+        ctx <- TLS.contextNew (backend h2 send recvN) params
 #endif
         TLS.contextHookSetLogging ctx tlsLogging
 #if MIN_VERSION_warp(3,5,0)
@@ -505,6 +517,7 @@ httpOverTls TLSSettings{..} set s bs0 params =
         mconn <- timeout tm $ do
 #endif
             TLS.handshake ctx
+            TLS.getNegotiatedProtocol ctx >>= I.writeIORef h2 . (== Just "h2")
             mysa <- getSocketName s
 #if MIN_VERSION_warp(3,4,13) && !MIN_VERSION_warp(3,5,0)
             attachConnWith byeTimeout mysa ctx appsInProgress
@@ -528,12 +541,25 @@ httpOverTls TLSSettings{..} set s bs0 params =
         | settingsUnsafeClose set = unsafeGracefulClose
 #endif
         | otherwise = gracefulClose
-    backend send recvN =
+    closer
+#if MIN_VERSION_warp(3,4,21)
+        | settingsUnsafeClose set = unsafeClose
+#endif
+        | otherwise = close
+    backend h2 send recvN =
         TLS.Backend
             { TLS.backendFlush = return ()
 #if MIN_VERSION_network(3,1,1)
-            , TLS.backendClose =
-                gracefulCloser s 5000 `E.catch` throughAsync (return ())
+            , TLS.backendClose = do
+                -- As a plain connection waits for a peer's FIN: by the
+                -- protocol, and not at all for 0.
+                isH2 <- I.readIORef h2
+                let tm
+                        | isH2 = settingsGracefulCloseTimeout2 set
+                        | otherwise = settingsGracefulCloseTimeout1 set
+                if tm <= 0
+                    then closer s
+                    else gracefulCloser s tm `E.catch` throughAsync (return ())
 #else
             , TLS.backendClose = close s
 #endif
@@ -602,7 +628,9 @@ attachConn
     -> IO (Connection, Transport)
 attachConn = attachConnWith 1000000
 
--- | 'attachConn' giving close_notify the microseconds given.
+-- | 'attachConn' giving close_notify the microseconds given.  With warp
+--   3.5.0 and later the number is not used: close_notify gives up with
+--   warp's send, as the connection's other writes do.
 attachConnWith
     :: Int
     -> SockAddr
@@ -757,13 +785,19 @@ plainHTTP TLSSettings{..} set s bs0 = case onInsecure of
         --        GOAWAY + INADEQUATE_SECURITY?
         -- FIXME: Content-Length:
         -- FIXME: TLS/<version>
-        sendAll
-            s
+#if MIN_VERSION_warp(3,5,0)
+        -- Given up on as warp's sends are.
+        giveUp <- readTVarIO $ connSendGiveUp cc
+        let send bs = sendAllWith s bs giveUp >>= either (\_ -> throwIO TimeoutThread) return
+#else
+        let send = sendAll s
+#endif
+        send
             "HTTP/1.1 426 Upgrade Required\
             \\r\nUpgrade: TLS/1.0, HTTP/1.1\
             \\r\nConnection: Upgrade\
             \\r\nContent-Type: text/plain\r\n\r\n"
-        mapM_ (sendAll s) $ L.toChunks lbs
+        mapM_ send $ L.toChunks lbs
         unsafeClose s
         throwIO InsecureConnectionDenied
 
