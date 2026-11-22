@@ -19,6 +19,7 @@
 module System.ThreadManager (
     ThreadManager,
     newThreadManager,
+    withThreadManager,
     stopAfter,
     stopAfterWithResult,
     stopAfterWithGrace,
@@ -37,6 +38,16 @@ module System.ThreadManager (
     forkManagedByFinally,
     forkManagedTimeout,
     forkManagedTimeoutFinally,
+
+    -- * Results
+    Managed,
+    forkManagedWithResult,
+    managedThreadId,
+    waitManagedSTM,
+    pollManagedSTM,
+    waitManaged,
+    waitEitherManaged,
+    waitEitherManagedSTM,
 
     -- * Synchronization
     waitUntilAllGone,
@@ -159,6 +170,24 @@ instance Exception KilledByThreadManager where
     toException = E.asyncExceptionToException
     fromException = E.asyncExceptionFromException
 
+-- | Running an action with a manager of its own, which is stopped once the
+--   action is done, however it ends: the threads left are killed, as the
+--   last resort, and waited for for at most this many microseconds.  A
+--   thread which does not end by then is left, still counted.
+--
+--   Threads which should end by themselves first are told with
+--   'waitStoppingSTM' before, by the caller: this kills at once.
+--
+-- @since 0.5.3
+withThreadManager :: Int -> (ThreadManager -> IO a) -> IO a
+withThreadManager cap action = do
+    mgr <- newThreadManager
+    E.mask $ \restore -> do
+        r <- E.try $ restore $ action mgr
+        E.uninterruptibleMask_ $
+            stopAfter mgr (return ()) $ \_ -> void $ waitUntilAllGoneFor mgr cap
+        either (E.throwIO :: SomeException -> IO a) return r
+
 -- | Stopping the manager.
 --
 -- @
@@ -213,7 +242,9 @@ stopAfterWithResult mgr@ThreadManager{..} action cleanup = do
         -- themselves out as they end, and 'managerStopped' is what keeps
         -- new ones from arriving.
         atomically $ writeTVar managerStopped True
-        killAll mgr ma
+        -- Not interrupted: an exception landing in a 'throwTo' here used
+        -- to leave the rest of the threads alive for good.
+        E.uninterruptibleMask_ $ killAll mgr ma
         cleanup ma
 
 -- | Killing every thread the manager has, telling them how the action
@@ -242,8 +273,11 @@ stopAfterWithGrace mgr@ThreadManager{..} grace action cleanup =
     E.mask $ \unmask -> do
         ma <- E.try $ unmask action
         atomically $ writeTVar managerStopped True
-        gone <- waitUntilAllGoneFor mgr grace
-        unless gone $ killAll mgr ma
+        -- Not interrupted, the wait being bounded by the grace: an
+        -- exception landing in it used to skip the last resort.
+        E.uninterruptibleMask_ $ do
+            gone <- waitUntilAllGoneFor mgr grace
+            unless gone $ killAll mgr ma
         cleanup $ either Just (const Nothing) ma
         either E.throwIO return ma
 
@@ -395,6 +429,91 @@ forkManagedTimeoutFinally mgr timmgr label io final =
                 T.withHandle timmgr (void $ forkIO $ lockAndKill wtid ref ex) io
   where
     ex = KilledByThreadManager Nothing
+
+----------------------------------------------------------------
+
+-- | A managed thread whose end can be waited for, as an @Async@ of the
+--   async package can: its result, or the exception it ended with.
+--
+-- @since 0.5.3
+data Managed a = Managed ThreadId (TMVar (Either SomeException a))
+
+-- | Fork a managed thread whose end is kept for 'waitManagedSTM'.
+--
+--   Nothing it ends with is thrown on, so nothing is printed: what to do
+--   with it is the waiter's.  Being killed by the manager is an end like
+--   any other, and a thread the stopped manager does not run at all ends
+--   with 'KilledByThreadManager' too, so a waiter never waits for ever.
+--
+-- @since 0.5.3
+forkManagedWithResult :: ThreadManager -> String -> IO a -> IO (Managed a)
+forkManagedWithResult mgr label io = do
+    var <- newEmptyTMVarIO
+    let put = atomically . void . tryPutTMVar var
+    -- Masked but for the action, so that a kill cannot land between the
+    -- action's end and its being kept.  The action runs in the caller's
+    -- masking state, as async's does.
+    tid <-
+        E.mask $ \restore ->
+            forkManagedByFinally
+                mgr
+                (\body -> forkIO $ body restore)
+                label
+                (\restore' -> E.try (restore' io) >>= put)
+                (put $ Left $ E.toException $ KilledByThreadManager Nothing)
+    return $ Managed tid var
+
+-- | The thread of 'forkManagedWithResult', as for a last resort of the
+--   caller's own.
+--
+-- @since 0.5.3
+managedThreadId :: Managed a -> ThreadId
+managedThreadId (Managed tid _) = tid
+
+-- | Succeeding with how a thread of 'forkManagedWithResult' ended, once
+--   it has.
+--
+-- @since 0.5.3
+waitManagedSTM :: Managed a -> STM (Either SomeException a)
+waitManagedSTM (Managed _ var) = readTMVar var
+
+-- | How a thread of 'forkManagedWithResult' ended, if it has.
+--
+-- @since 0.5.3
+pollManagedSTM :: Managed a -> STM (Maybe (Either SomeException a))
+pollManagedSTM (Managed _ var) = tryReadTMVar var
+
+-- | What a thread of 'forkManagedWithResult' returned, or its exception
+--   thrown on, as @wait@ of the async package.
+--
+-- @since 0.5.3
+waitManaged :: Managed a -> IO a
+waitManaged m = waiting (waitManagedSTM m) >>= either E.throwIO return
+
+-- | 'waitEitherManagedSTM' in 'IO', waiting as 'waitManaged' does.
+--
+-- @since 0.5.3
+waitEitherManaged :: Managed a -> Managed b -> IO (Either a b)
+waitEitherManaged a b = waiting $ waitEitherManagedSTM a b
+
+-- | Waiting for threads of 'forkManagedWithResult', again if told that the
+--   wait is blocked indefinitely.  Once nothing that could wake the threads
+--   is reachable, the run-time system throws that to them and to whoever
+--   waits for them at once, but they then end and say so.  Once, as async
+--   does: again and again is a loop of collections for the run-time system.
+waiting :: STM a -> IO a
+waiting stm = atomically stm `E.catch` \E.BlockedIndefinitelyOnSTM -> atomically stm
+
+-- | The first of two threads of 'forkManagedWithResult' to end, its
+--   exception thrown on, as @waitEitherSTM@ of the async package.
+--
+-- @since 0.5.3
+waitEitherManagedSTM :: Managed a -> Managed b -> STM (Either a b)
+waitEitherManagedSTM a b =
+    (Left <$> (waitManagedSTM a >>= either throwSTM return))
+        `orElse` (Right <$> (waitManagedSTM b >>= either throwSTM return))
+
+----------------------------------------------------------------
 
 -- | The body of a managed thread, under its own label, taking the place
 --   kept for it.

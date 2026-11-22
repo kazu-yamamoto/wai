@@ -19,6 +19,7 @@ import qualified GHC.Event as EV
 import Control.Concurrent (
     MVar,
     forkIO,
+    myThreadId,
     newEmptyMVar,
     putMVar,
     takeMVar,
@@ -31,6 +32,7 @@ import qualified Control.Concurrent.STM as STM
 import Control.Exception (AssertionFailed (..), finally, throwIO)
 import qualified Control.Exception as E
 import Control.Monad (forM_, unless, void, when)
+import Data.Maybe (isJust, isNothing)
 import Data.IORef as I (
     IORef,
     atomicModifyIORef',
@@ -44,6 +46,7 @@ import GHC.Conc.Sync (
     setUncaughtExceptionHandler,
  )
 import System.ThreadManager (
+    KilledByThreadManager,
     ThreadManager,
     countManaged,
     forkManaged,
@@ -51,11 +54,16 @@ import System.ThreadManager (
     forkManagedTimeout,
     forkManagedTimeoutFinally,
     forkManagedUnmaskFinally,
+    forkManagedWithResult,
+    managedThreadId,
     newThreadManager,
+    pollManagedSTM,
     reserveManaged,
     stopAfter,
     stopAfterWithGrace,
     takeReservation,
+    withThreadManager,
+    waitManagedSTM,
     waitStoppingSTM,
     waitUntilAllGone,
     waitUntilAllGoneFor,
@@ -93,11 +101,11 @@ main = hspec $ do
             stopAfter tm (return ()) $ \_ -> return ()
             ran <- freshRef
             escaped <- freshRef
-            before <- getUncaughtExceptionHandler
+            handler0 <- getUncaughtExceptionHandler
             setUncaughtExceptionHandler $ \_ -> I.writeIORef escaped True
             forkManagedTimeout tm defaultManager "probe" $ \_ -> I.writeIORef ran True
             threadDelay 200_000
-            setUncaughtExceptionHandler before
+            setUncaughtExceptionHandler handler0
             ran `refShouldBe` False
             escaped `refShouldBe` False
 
@@ -118,6 +126,76 @@ main = hspec $ do
 
         itLetsTheExceptionOutOf "forkManagedUnmaskFinally" $
             \tm label io -> forkManagedUnmaskFinally tm label (\unmask -> unmask io)
+
+    describe "ThreadManager, threads with a result" $ do
+        it "keeps what the thread returned" $ do
+            tm <- newThreadManager
+            m <- forkManagedWithResult tm "probe" $ return (42 :: Int)
+            r <- atomically $ waitManagedSTM m
+            either (const Nothing) Just r `shouldBe` Just 42
+            waitUntilAllGoneFor tm 1_000_000 `shouldReturn` True
+
+        it "keeps what the thread threw, and does not throw it on" $ do
+            tm <- newThreadManager
+            m <- forkManagedWithResult tm "probe" $ throwIO (userError "boom") >> return ()
+            r <- atomically $ waitManagedSTM m
+            either (\e -> show e) (const "") r `shouldBe` show (userError "boom")
+
+        it "gives up waiting for a thread which swallows the kill, after the cap" $ do
+            t0 <- getMonotonicTimeNSec
+            withThreadManager 200_000 $ \tm ->
+                void $ forkManagedWithResult tm "probe" $
+                    E.uninterruptibleMask_ (threadDelay 2_000_000)
+            t1 <- getMonotonicTimeNSec
+            (t1 - t0) `shouldSatisfy` (< 1_500_000_000)
+
+        it "is stopped with the scope of withThreadManager" $ do
+            m <- withThreadManager 1_000_000 $ \tm -> forkManagedWithResult tm "probe" $ threadDelay 10_000_000
+            -- Killed and waited for by then.
+            r <- atomically $ pollManagedSTM m
+            fmap (either (isJust . (E.fromException :: E.SomeException -> Maybe KilledByThreadManager)) (const False)) r
+                `shouldBe` Just True
+
+        it "runs the thread in the caller's masking state" $ do
+            tm <- newThreadManager
+            m0 <- forkManagedWithResult tm "probe" E.getMaskingState
+            m1 <- E.mask_ $ forkManagedWithResult tm "probe" E.getMaskingState
+            r0 <- atomically $ waitManagedSTM m0
+            r1 <- atomically $ waitManagedSTM m1
+            either (const Nothing) Just r0 `shouldBe` Just E.Unmasked
+            either (const Nothing) Just r1 `shouldBe` Just E.MaskedInterruptible
+
+        it "tells the thread it runs on" $ do
+            tm <- newThreadManager
+            var <- newEmptyMVar
+            m <- forkManagedWithResult tm "probe" $ myThreadId >>= putMVar var
+            takeMVar var `shouldReturn` managedThreadId m
+
+        it "tells nothing before the thread has ended" $ do
+            tm <- newThreadManager
+            go <- newEmptyMVar
+            m <- forkManagedWithResult tm "probe" $ takeMVar go
+            atomically (isNothing <$> pollManagedSTM m) `shouldReturn` True
+            putMVar go ()
+            r <- atomically $ waitManagedSTM m
+            either (const False) (const True) r `shouldBe` True
+
+        it "ends with the kill of the manager stopping" $ do
+            tm <- newThreadManager
+            m <- forkManagedWithResult tm "probe" $ threadDelay 10_000_000
+            threadDelay 50_000
+            stopAfter tm (return ()) $ \_ -> return ()
+            r <- Timeout.timeout 1_000_000 $ atomically $ waitManagedSTM m
+            fmap (either (isJust . (E.fromException :: E.SomeException -> Maybe KilledByThreadManager)) (const False)) r
+                `shouldBe` Just True
+
+        it "ends a thread the stopped manager does not run" $ do
+            tm <- newThreadManager
+            stopAfter tm (return ()) $ \_ -> return ()
+            m <- forkManagedWithResult tm "probe" $ return ()
+            r <- Timeout.timeout 1_000_000 $ atomically $ waitManagedSTM m
+            fmap (either (isJust . (E.fromException :: E.SomeException -> Maybe KilledByThreadManager)) (const False)) r
+                `shouldBe` Just True
 
     describe "ThreadManager, stopped with a grace" $ do
         it "lets a thread waiting for the stop end by itself" $ do
@@ -460,11 +538,11 @@ itLetsTheExceptionOutOf name fork =
         tm <- newThreadManager
         escaped <- newEmptyMVar
         cleaned <- freshRef
-        before <- getUncaughtExceptionHandler
+        handler0 <- getUncaughtExceptionHandler
         setUncaughtExceptionHandler $ \_ -> void $ tryPutMVar escaped ()
         fork tm "probe" (throwIO $ userError "probe") (I.writeIORef cleaned True)
         out <- ranWithin 500_000 escaped
-        setUncaughtExceptionHandler before
+        setUncaughtExceptionHandler handler0
         out `shouldBe` True
         cleaned `refShouldBe` True
 
