@@ -336,16 +336,18 @@ runSettingsSocket oldSettings socket app = do
     runSettingsConnectionMakerSecureWith
         newSettings
         listener
-        (first (\mk cc -> (,TCP) <$> mk cc) <$> getConnMaker listener newSettings)
+        (getConnMaker listener newSettings)
         app
   where
     getConnMaker listener set = do
         macc <- acceptOrStop listener
         (s, sa) <- maybe (E.throwIO AcceptStopped) return macc
-        setSocketCloseOnExec s
-        -- NoDelay causes an error for AF_UNIX.
-        setSocketOption s NoDelay 1 `E.catch` throughAsync (return ())
-        return (\cc -> socketConnection set cc s, sa)
+        (`E.onException` close s) $ do
+            setSocketCloseOnExec s
+            -- NoDelay causes an error for AF_UNIX.
+            setSocketOption s NoDelay 1 `E.catch` throughAsync (return ())
+        let mk cc = (,TCP) <$> socketConnection set cc s
+        return (ConnMaker mk (close s), sa)
 
 -- | The connection setup action would be expensive. A good example
 -- is initialization of TLS.
@@ -358,12 +360,13 @@ runSettingsSocket oldSettings socket app = do
 -- @since 1.3.5
 runSettingsConnection
     :: Settings -> IO (Connection, SockAddr) -> Application -> IO ()
-runSettingsConnection set getConn app = runSettingsConnectionMaker set getConnMaker app
+runSettingsConnection set getConn app = runSettingsConnectionMakerSecure set getConnMaker app
   where
     getConnMaker = do
         (conn, sa) <- getConn
         -- Already made, so there is nothing for the context to be used by.
-        return (const $ return conn, sa)
+        let abandon = connClose conn `E.finally` (readIORef (connWriteBuffer conn) >>= bufFree)
+        return (ConnMaker (const $ return (conn, TCP)) abandon, sa)
 
 -- | This modifies the connection maker so that it returns 'TCP' for 'Transport'
 -- (i.e. plain HTTP) then calls 'runSettingsConnectionMakerSecure'.  A
@@ -376,7 +379,9 @@ runSettingsConnectionMaker
 runSettingsConnectionMaker x y =
     runSettingsConnectionMakerSecure x (toTCP <$> y)
   where
-    toTCP = first (\mk cc -> (,TCP) <$> mk cc)
+    -- Nothing to close a connection never made with: left to the
+    -- garbage collector, as before.
+    toTCP = first (\mk -> ConnMaker (\cc -> (,TCP) <$> mk cc) (return ()))
 
 ----------------------------------------------------------------
 
@@ -392,7 +397,7 @@ runSettingsConnectionMaker x y =
 -- @since 2.1.4
 runSettingsConnectionMakerSecure
     :: Settings
-    -> IO (ConnContext -> IO (Connection, Transport), SockAddr)
+    -> IO (ConnMaker, SockAddr)
     -> Application
     -> IO ()
 runSettingsConnectionMakerSecure set = runSettingsConnectionMakerSecureWith set noListener
@@ -408,7 +413,7 @@ runSettingsConnectionMakerSecure set = runSettingsConnectionMakerSecureWith set 
 runSettingsConnectionMakerSecureWith
     :: Settings
     -> Listener
-    -> IO (ConnContext -> IO (Connection, Transport), SockAddr)
+    -> IO (ConnMaker, SockAddr)
     -> Application
     -> IO ()
 runSettingsConnectionMakerSecureWith oldSettings listener getConnMaker app = do
@@ -457,7 +462,7 @@ withII set action =
 acceptConnection
     :: Settings
     -> Listener
-    -> IO (ConnContext -> IO (Connection, Transport), SockAddr)
+    -> IO (ConnMaker, SockAddr)
     -> Application
     -> Counter
     -> InternalInfo
@@ -504,8 +509,8 @@ acceptConnection set listener getConnMaker app counter ii fdRef = do
         mx <- acceptNewConnection
         case mx of
             Nothing -> return ()
-            Just (mkConn, addr) -> do
-                fork set mkConn addr app counter ii
+            Just (maker, addr) -> do
+                fork set maker addr app counter ii
                 acceptLoop
 
     -- The maker throws this when the server has been asked to stop, which
@@ -583,13 +588,13 @@ acceptConnection set listener getConnMaker app counter ii fdRef = do
 -- function to unmask (i.e., allow async exceptions to be thrown).
 fork
     :: Settings
-    -> (ConnContext -> IO (Connection, Transport))
+    -> ConnMaker
     -> SockAddr
     -> Application
     -> Counter
     -> InternalInfo
     -> IO ()
-fork set mkConn addr app counter ii = do
+fork set ConnMaker{makeConnection, abandonConnection} addr app counter ii = do
     -- The connection is counted from here rather than from the thread
     -- below.  The accept loop does not wait for that thread to be
     -- scheduled, so counting there leaves a window in which the connection
@@ -597,11 +602,13 @@ fork set mkConn addr app counter ii = do
     -- counter.
     -- Eta-expanded so that GHC 9.0, which lacks deep subsumption, accepts
     -- 'runConnection' at the rank-2 type.
-    forkConnection counter (settingsFork set) (\unmask -> runConnection unmask)
+    -- What was accepted is closed without a connection made of it when the
+    -- thread never runs: the fork failing, or the server stopping first.
+    forkConnection counter (settingsFork set) (\unmask -> runConnection unmask) abandonConnection
   where
     runConnection unmask = do
         tid <- myThreadId
-        cc <- newConnContext set
+        cc <- newConnContext set `E.onException` abandonConnection
         -- Call the user-supplied on exception code if any
         -- exceptions are thrown.
         --
@@ -624,7 +631,7 @@ fork set mkConn addr app counter ii = do
                 -- A connection maker which throws must close what it
                 -- accepted itself: there is no connection here to close.
                 withWatchdog (connWatchdog cc) (E.throwTo tid T.TimeoutThread) $
-                    E.bracket (mkConn cc) (cleanUp cc) (serve unmask cc)
+                    E.bracket (makeConnection cc) (cleanUp cc) (serve unmask cc)
 
     -- What is said while closing, close_notify say, waits no longer than
     -- the watchdog gives a timed-out connection to finish by itself.

@@ -41,6 +41,7 @@ module Network.Wai.Handler.Warp.Internal (
     -- * Connection
     Connection (..),
     ConnContext (..),
+    ConnMaker (..),
     newConnContext,
     socketConnection,
 

@@ -14,7 +14,7 @@ import Network.HTTP.Types (internalServerError500)
 import Network.Socket (SockAddr (SockAddrInet), close, tupleToHostAddress)
 import Network.Wai (remoteHost)
 import Network.Wai.Handler.Warp
-import Network.Wai.Handler.Warp.Internal (runSettingsConnectionMakerSecure)
+import Network.Wai.Handler.Warp.Internal (ConnContext, ConnMaker (..), Connection, Transport, runSettingsConnectionMakerSecure)
 import System.Timeout (timeout)
 import Test.Hspec
 
@@ -35,7 +35,7 @@ spec = describe "connection exception peer" $ do
         let settings = setOnException (\request -> record events (remoteHost <$> request)) defaultSettings
         withAsync (runSettingsConnectionMakerSecure settings (readChan makers) unusedApplication) $ \server -> do
             link server
-            writeChan makers (const $ throwIO (ConnectionFailure 1), peer 100)
+            writeChan makers (failing $ const $ throwIO (ConnectionFailure 1), peer 100)
             timeout 2000000 (readChan events) `shouldReturn` Just (1, Nothing)
 
     it "gets the current legacy observer as the default connection observer" $ do
@@ -94,7 +94,7 @@ spec = describe "connection exception peer" $ do
         withAsync (runSettingsConnectionMakerSecure settings (readChan makers) unusedApplication) $ \server -> do
             link server
             forM_ [(5, 130), (6, 140)] $ \(failureId, peerId) -> do
-                writeChan makers (const $ throwIO (ConnectionFailure failureId), peer peerId)
+                writeChan makers (failing $ const $ throwIO (ConnectionFailure failureId), peer peerId)
                 timeout 2000000 (readChan events) `shouldReturn` Just (failureId, Just (peer peerId))
 
     it "reports peers when overlapping connection makers fail in reverse order" $ do
@@ -107,8 +107,8 @@ spec = describe "connection exception peer" $ do
             maker i gate _ = writeChan started i >> takeMVar gate >> throwIO (ConnectionFailure i)
         withAsync (runSettingsConnectionMakerSecure settings (readChan makers) unusedApplication) $ \server -> do
             link server
-            writeChan makers (maker 7 first, peer 150)
-            writeChan makers (maker 8 second, peer 160)
+            writeChan makers (failing $ maker 7 first, peer 150)
+            writeChan makers (failing $ maker 8 second, peer 160)
             -- Release both workers even when a readiness assertion fails.
             let release = forM_ [first, second] $ \gate -> void (tryPutMVar gate ())
             flip finally release $ do
@@ -121,6 +121,10 @@ spec = describe "connection exception peer" $ do
                 (secondEvent, firstEvent) `shouldBe` (Just (8, Just (peer 160)), Just (7, Just (peer 150)))
   where
     unusedApplication _ _ = fail "connection maker must fail before the application"
+
+-- A maker with nothing accepted to close.
+failing :: (ConnContext -> IO (Connection, Transport)) -> ConnMaker
+failing mk = ConnMaker mk (return ())
 
 -- Install the peer observer used by the regression assertions. The original
 -- failing commit had to infer peers from Maybe Request.

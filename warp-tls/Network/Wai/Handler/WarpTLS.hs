@@ -368,20 +368,21 @@ getter
 #endif
     -> Socket
     -> params
-    -> IO (
 #if MIN_VERSION_warp(3,5,0)
-        ConnContext ->
+    -> IO (ConnMaker, SockAddr)
+#else
+    -> IO (IO (Connection, Transport), SockAddr)
 #endif
-        IO (Connection, Transport), SockAddr
-    )
 #if MIN_VERSION_warp(3,4,18)
 getter tlsset set listener _sock params = do
     macc <- acceptOrStop listener
     (s, sa) <- maybe (throwIO AcceptStopped) return macc
-    setSocketCloseOnExec s
 #if MIN_VERSION_warp(3,5,0)
-    return (\cc -> mkConn tlsset set cc s params, sa)
+    setSocketCloseOnExec s `onException` unsafeClose s
+    -- Closed without a handshake if warp never makes the connection.
+    return (ConnMaker (\cc -> mkConn tlsset set cc s params) (unsafeClose s), sa)
 #else
+    setSocketCloseOnExec s
     return (mkConn tlsset set s params, sa)
 #endif
 #else

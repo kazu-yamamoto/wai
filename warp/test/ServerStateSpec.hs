@@ -3,7 +3,11 @@
 module ServerStateSpec where
 
 import Network.Wai.Handler.Warp (getServerState)
-import Network.Wai.Handler.Warp.Counter (Counter, forkConnection)
+import Control.Concurrent (forkIO, newEmptyMVar, putMVar, takeMVar)
+import Control.Monad (void)
+import Network.Wai.Handler.Warp.Counter (Counter, forkConnection, threadManager)
+import System.ThreadManager (stopAfter)
+import System.Timeout (timeout)
 import Network.Wai.Handler.Warp.Settings (
     ServerState (..),
     currentOpenConnections,
@@ -22,7 +26,7 @@ main = hspec spec
 --   thread: the place is kept and never taken, which is all these tests
 --   ask of the counter.
 countOneMore :: Counter -> IO ()
-countOneMore counter = forkConnection counter (\_ -> return ()) (\_ -> return ())
+countOneMore counter = forkConnection counter (\_ -> return ()) (\_ -> return ()) (return ())
 
 spec :: Spec
 spec = do
@@ -62,3 +66,17 @@ spec = do
             (ss2, _set2) <- makeServerState set1
             incAndCheck ss2 2
             incAndCheck ss1 3
+    describe "forkConnection" $ do
+        it "abandons a connection whose thread the stopped manager refuses" $ do
+            ss <- newServerState
+            let counter = serverConnectionCounter ss
+            stopAfter (threadManager counter) (return ()) $ \_ -> return ()
+            served <- newEmptyMVar
+            abandoned <- newEmptyMVar
+            forkConnection
+                counter
+                (\body -> void $ forkIO $ body id)
+                (\_ -> putMVar served ())
+                (putMVar abandoned ())
+            timeout 1000000 (takeMVar abandoned) `shouldReturn` Just ()
+            timeout 100000 (takeMVar served) `shouldReturn` Nothing

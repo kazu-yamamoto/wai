@@ -255,6 +255,21 @@ readLeftoverSource (Source ref _) = readIORef ref
 
 ----------------------------------------------------------------
 
+-- | What a connection maker hands warp for a connection it accepted:
+--   how to make the connection, and how to close what was accepted without
+--   making it.  Once warp has it, exactly one of the two is called, once:
+--   'makeConnection' on the thread serving the connection, whose
+--   'connClose' warp calls in the end, or 'abandonConnection' when that
+--   thread never runs, its fork failing or the server stopping first.  A
+--   connection maker which fails before handing this over must close what
+--   it accepted itself, and so must 'makeConnection' if it fails.
+--
+-- @since 3.5.0
+data ConnMaker = ConnMaker
+    { makeConnection :: ConnContext -> IO (Connection, Transport)
+    , abandonConnection :: IO ()
+    }
+
 -- | What kind of transport is used for this connection?
 data Transport
     = -- | Plain channel: TCP

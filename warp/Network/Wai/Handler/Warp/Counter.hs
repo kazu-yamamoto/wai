@@ -14,10 +14,13 @@ module Network.Wai.Handler.Warp.Counter (
 ) where
 
 import Control.Concurrent.STM
+import Control.Monad (when)
+import Control.Exception (onException)
+import Data.IORef (atomicModifyIORef', newIORef)
 import System.ThreadManager (
     ThreadManager,
     countManaged,
-    forkManagedBy,
+    forkManagedByFinally,
     newThreadManager,
     waitUntilAllGone,
     waitUntilAllGoneFor,
@@ -72,7 +75,22 @@ forkConnection
     -> ((forall x. IO x -> IO x) -> IO ())
     -- ^ Serving the connection
     -> IO ()
-forkConnection (Counter tm) fork io = forkManagedBy tm fork "Warp just forked" io
+    -- ^ Run instead when the thread never serves it: the fork failing, or
+    --   a manager stopped before the thread could be recorded
+    -> IO ()
+forkConnection (Counter tm) fork io refused = do
+    -- Whoever claims it first, the thread to serve or a way out without
+    -- it to give up on it, is the only one to do so.
+    claimed <- newIORef False
+    let claim = atomicModifyIORef' claimed $ \b -> (True, not b)
+        giveUp = claim >>= \won -> when won refused
+    forkManagedByFinally
+        tm
+        fork
+        "Warp just forked"
+        (\unmask -> claim >>= \won -> when won $ io unmask)
+        giveUp
+        `onException` giveUp
 
 -- | Get the current count of open connections.
 --
