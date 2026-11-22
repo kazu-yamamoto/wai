@@ -171,7 +171,8 @@ data Settings = Settings
     -- @since 3.2.7
     , settingsGracefulShutdownTimeout :: Maybe Int
     -- ^ An optional timeout to limit the time (in seconds) waiting for
-    -- a graceful shutdown of the web server.
+    -- a graceful shutdown of the web server.  The connections still there
+    -- then are killed and given up to two seconds more to unwind.
     --
     -- @since 3.2.8
     , settingsGracefulCloseTimeout1 :: Int

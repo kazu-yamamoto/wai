@@ -4,7 +4,8 @@
 -- | WAI handler for HTTP/3 based on QUIC.
 module Network.Wai.Handler.WarpQUIC where
 
-import Control.Concurrent (forkIO)
+import Control.Concurrent (forkIO, myThreadId)
+import GHC.Conc (labelThread)
 import Control.Concurrent.STM
 import Control.Monad (void)
 import qualified Data.ByteString as BS
@@ -83,13 +84,23 @@ stoppableBy settings (Draining draining active) quicsettings =
   where
     drainThen stopServer = do
         atomically $ writeTVar draining True
+        -- Forked so that the shutdown handler returns; it ends once the
+        -- connections are gone or the graceful timeout has passed.
         void $ forkIO $ do
+            myThreadId >>= flip labelThread "WarpQUIC draining"
             late <- case settingsGracefulShutdownTimeout settings of
                 Nothing -> newTVarIO False
-                Just sec -> registerDelay $ sec * 1000000
+                Just sec -> registerDelay $ toMicros sec
             atomically $
                 (readTVar active >>= check . (== 0)) `orElse` (readTVar late >>= check)
             stopServer
+
+-- | Seconds in microseconds, kept from overflowing on 32 bits.
+toMicros :: Int -> Int
+toMicros sec
+    | sec <= 0 = 0
+    | sec >= maxBound `div` 1000000 = maxBound
+    | otherwise = sec * 1000000
 
 -- | H3_NO_ERROR (RFC 9114 Sec 8.1): the connection is being closed and
 --   nothing went wrong.  What a stopping server tells its peers, and said in

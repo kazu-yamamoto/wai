@@ -487,7 +487,11 @@ acceptConnection set listener getConnMaker app counter ii fdRef = do
     -- Warp forks a thread per connection and nothing else owns them, so
     -- without this they go on running after the caller of 'runSettings'
     -- has been handed its exception back.  See #1126.
-    flip (T.stopAfter (threadManager counter)) (const $ return ()) $ do
+    -- The kills are only sent by then: what was killed is given a moment
+    -- to unwind before the caches it may use are torn down.  A connection
+    -- resisting longer, as an HTTP/2 one may for http2's own 5 s, is left
+    -- to it, as an application resisting a kill always was.
+    flip (T.stopAfter (threadManager counter)) (\_ -> void $ waitForZeroFor counter 2_000_000) $ do
         void $ E.mask_ acceptLoop
         -- Nothing is waiting on the listening socket any more, so it can be
         -- closed and the port left to a successor rather than held for as
@@ -581,11 +585,11 @@ acceptConnection set listener getConnMaker app counter ii fdRef = do
         when (fdExhaustion /= FdExhausted) $
             settingsOnException set Nothing $ E.toException e
         hasDecreased <- waitForDecreased counter
-        -- If we get 'NoConnections', that means the file
-        -- descriptor exhaustion is outside of our control.
-        -- We flag it so that 'settingsOnException' doesn't get
-        -- called until the exhaustion issue is resolved.
-        when (hasDecreased == NoConnections) $ setFdExhaustion fdRef
+        -- Unless a connection ended, the exhaustion goes on: outside of
+        -- our control ('NoConnections'), or ours still open after a while
+        -- ('StillOpen').  We flag it so that 'settingsOnException' doesn't
+        -- get called again until the exhaustion issue is resolved.
+        when (hasDecreased /= HasDecreased) $ setFdExhaustion fdRef
 
 -- Fork a new worker thread for this connection maker, and ask for a
 -- function to unmask (i.e., allow async exceptions to be thrown).

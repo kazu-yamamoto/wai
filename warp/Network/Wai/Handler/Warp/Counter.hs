@@ -1,3 +1,4 @@
+{-# LANGUAGE NumericUnderscores #-}
 {-# LANGUAGE RankNTypes #-}
 
 module Network.Wai.Handler.Warp.Counter (
@@ -50,18 +51,26 @@ waitForZero (Counter tm) = waitUntilAllGone tm
 waitForZeroFor :: Counter -> Int -> IO Bool
 waitForZeroFor (Counter tm) = waitUntilAllGoneFor tm
 
-data HasDecreased = HasDecreased | NoConnections
+data HasDecreased = HasDecreased | NoConnections | StillOpen
     deriving (Eq, Show)
 
+-- | Waiting for a connection to end, for a second at most: the accept
+--   loop waiting here looks again then, at whether it has been told to
+--   stop among the rest.  With none to wait for, it waits the second.
 waitForDecreased :: Counter -> IO HasDecreased
 waitForDecreased (Counter tm) = do
     n0 <- atomically $ countManaged tm
+    late <- registerDelay 1_000_000
+    let expired = readTVar late >>= check
     if n0 <= 0
-        then pure NoConnections
-        else atomically $ do
-            n <- countManaged tm
-            check (n < n0)
-            pure HasDecreased
+        then NoConnections <$ atomically expired
+        else atomically $
+            ( do
+                n <- countManaged tm
+                check (n < n0)
+                pure HasDecreased
+            )
+                `orElse` (StillOpen <$ expired)
 
 -- | Serving a connection on a thread made by the given fork.  The
 --   connection is counted from here rather than from when that thread
