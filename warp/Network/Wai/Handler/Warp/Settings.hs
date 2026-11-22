@@ -401,10 +401,13 @@ defaultShouldDisplayException se
     | isAsyncException se = False
     -- A receive given up on, let out by a connection maker of the user's.
     | Just RecvGivenUp <- fromException se = False
-    -- An HTTP/2 peer which goes away or falls silent.
+    -- An HTTP/2 peer which goes away, resets or falls silent; a wrapped
+    -- exception is judged as itself.
     | Just (e :: H2C.HTTP2Error) <- fromException se = case e of
         H2C.ConnectionIsClosed -> False
         H2C.ConnectionIsTimeout -> False
+        H2C.ConnectionIsReset -> False
+        H2C.BadThingHappen e' -> defaultShouldDisplayException e'
         _ -> True
     | otherwise = True
 
