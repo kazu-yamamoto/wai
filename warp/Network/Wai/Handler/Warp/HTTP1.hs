@@ -123,6 +123,8 @@ http1server settings ii conn cc transport app addr th istatus src =
         -- See comment below referencing
         -- https://github.com/yesodweb/wai/issues/618
         | Just NoKeepAliveRequest <- fromException e = return ()
+        -- A receive given up on, as at end of input.
+        | Just RecvGivenUp <- fromException e = return ()
         -- No valid request
         | Just (BadFirstLine _) <- fromException e = return ()
         | isAsyncException e = throwIO e

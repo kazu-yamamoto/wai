@@ -517,7 +517,15 @@ httpOverTls TLSSettings{..} set s bs0 params =
         let tm = settingsTimeout set * 1000000
         mconn <- timeout tm $ do
 #endif
+#if MIN_VERSION_warp(3,5,0)
+            -- A handshake ended by the shutdown is a quiet end, as a first
+            -- read ended by it is: tls reports it as a failed handshake.
+            TLS.handshake ctx `E.catch` \e -> do
+                down <- atomically $ currentShuttingDownStateSTM ss
+                if down then throwIO TimeoutThread else throwIO (e :: TLS.TLSException)
+#else
             TLS.handshake ctx
+#endif
             TLS.getNegotiatedProtocol ctx >>= I.writeIORef h2 . (== Just "h2")
             mysa <- getSocketName s
 #if MIN_VERSION_warp(3,4,13) && !MIN_VERSION_warp(3,5,0)
@@ -530,7 +538,15 @@ httpOverTls TLSSettings{..} set s bs0 params =
           Nothing -> throwIO IncompleteHeaders
           Just conn -> return conn
 #endif
+#if MIN_VERSION_warp(3,5,0)
+    -- A receive given up on reaches tls as an exception, not as the
+    -- peer's EOF, so that close_notify can still be sent.
+    wrappedRecvN recvN n = handle (\e -> case E.fromException e of
+        Just RecvGivenUp -> throwIO e
+        Nothing -> throughAsync (return "") e) $ recvN n
+#else
     wrappedRecvN recvN n = handle (throughAsync (return "")) $ recvN n
+#endif
     -- A peer which does not read is why a timed-out connection is
     -- closed, so close_notify is given a quarter of the timeout, at most
     -- a second, rather than waiting for that peer for ever.
@@ -569,20 +585,29 @@ httpOverTls TLSSettings{..} set s bs0 params =
             }
 #if MIN_VERSION_warp(3,5,0) && MIN_VERSION_tls(2,6,0)
     -- A receive which 'bye' gives up on too, through what warp's recv
-    -- gives up on: it then ends as at end of input.
+    -- gives up on: answered then with bye's own give-up.
     recvNWith recvN = TLS.RecvWith $ \n stop -> do
         given <- newTVarIO Nothing
         let var = connRecvGiveUp cc
         -- Only this receive's give-up: one the http2 library left may
-        -- have fired already, and bye's read would end as at end of input.
+        -- have fired already, and bye's read would give up at once.
         old <- readTVarIO var
-        atomically $ writeTVar var $ stop >>= writeTVar given . Just
-        bs <- recvN n `E.finally` atomically (writeTVar var old)
-        -- What was received is answered, given up on or not.
-        g <- readTVarIO given
-        return $ case g of
-            Just a | S.null bs -> Left a
-            _ -> Right bs
+        -- A timed-out connection gives up here too, rather than throwing
+        -- TimeoutThread past bye, which would then send no close_notify.
+        atomically $ writeTVar var $
+            (stop >>= writeTVar given . Just) <|> timedOutSTM (connWatchdog cc)
+        r <- E.try (recvN n) `E.finally` atomically (writeTVar var old)
+        -- Given up on by the shutdown or the timeout: tls 2.6.3 takes a
+        -- non-IO exception as a give-up too; an older one, only bye's own.
+#if MIN_VERSION_tls(2,6,3)
+        let gaveUpItself = throwIO RecvGivenUp
+#else
+        let gaveUpItself = Left <$> atomically stop
+#endif
+        case r of
+            Right bs -> return $ Right bs
+            -- Given up on by bye: bye's own give-up is what it is told.
+            Left RecvGivenUp -> readTVarIO given >>= maybe gaveUpItself (return . Left)
 #endif
 #if MIN_VERSION_warp(3,5,0)
     -- Giving up on what warp says through 'connSendGiveUp', as its own
@@ -681,6 +706,11 @@ attachConnWith byeTimeout mysa ctx = do
         recv = handle onEOF $ TLS.recvData ctx
           where
             onEOF e
+#if MIN_VERSION_warp(3,5,0)
+                -- Given up on: the end of input to warp, while tls, which
+                -- did not take it for EOF, can still send close_notify.
+                | Just RecvGivenUp <- E.fromException e = return S.empty
+#endif
 #if MIN_VERSION_tls(1,8,0)
                 | Just (TLS.PostHandshake TLS.Error_EOF) <- E.fromException e = return S.empty
 #else

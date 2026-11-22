@@ -115,7 +115,8 @@ socketConnection set cc s = (`E.onException` close s) $ do
             }
   where
     receive' bufferPool ss =
-        E.handle handler $ makeWatchedRecv s bufferPool ss cc
+        E.handle handler (makeWatchedRecv s bufferPool ss cc)
+            `E.catch` \RecvGivenUp -> return ""
       where
         handler :: E.IOException -> IO ByteString
         handler e
@@ -177,11 +178,14 @@ newConnContext set = do
 -- read and the shutdown are waited for at once, inside 'receiveWith'.
 makeGracefulRecv :: Socket -> BufferPool -> ServerState -> TVar Int -> Recv
 makeGracefulRecv sock pool ss appsInProgress =
-    makeGracefulRecvWith sock pool ss appsInProgress retry (return ()) retry
+    makeGracefulRecvWith sock pool ss appsInProgress retry (return ()) retry (return "")
 
 -- | 'makeGracefulRecv' which also gives up when the 'Watchdog' decides
--- that the connection timed out, by throwing 'T.TimeoutThread', and ends
--- as at end of input when 'connRecvGiveUp' fires.
+-- that the connection timed out, by throwing 'T.TimeoutThread'.  Given up
+-- on by the shutdown or by 'connRecvGiveUp', it throws 'RecvGivenUp'
+-- rather than ending as at end of input: a TLS backend would take @""@
+-- for the peer's EOF and not send close_notify.  A connection's own recv
+-- turns it into @""@.
 --
 -- The timeout is composed with the socket readiness in a single STM
 -- transaction, so a receiving thread is never killed from outside
@@ -199,12 +203,22 @@ makeWatchedRecv sock pool ss cc = do
         (timedOutSTM $ connWatchdog cc)
         (readTVar (connHandedOver cc) >>= check . not)
         giveUp
+        (E.throwIO RecvGivenUp)
 
 data GiveUp = ShuttingDown | TimedOut
 
 makeGracefulRecvWith
-    :: Socket -> BufferPool -> ServerState -> TVar Int -> STM () -> STM () -> STM () -> Recv
-makeGracefulRecvWith sock pool ss appsInProgress timedOut notHandedOver giveUp = do
+    :: Socket
+    -> BufferPool
+    -> ServerState
+    -> TVar Int
+    -> STM ()
+    -> STM ()
+    -> STM ()
+    -> Recv
+    -- ^ What a receive given up on answers
+    -> Recv
+makeGracefulRecvWith sock pool ss appsInProgress timedOut notHandedOver giveUp givenUp = do
     r <- receiveWith sock pool $
         -- when shutting down or told to give up
         ((checkShutdown <|> giveUp) $> ShuttingDown)
@@ -212,7 +226,7 @@ makeGracefulRecvWith sock pool ss appsInProgress timedOut notHandedOver giveUp =
         -- when the watchdog gave up on this connection
         (timedOut $> TimedOut)
     case r of
-        Left ShuttingDown -> return ""
+        Left ShuttingDown -> givenUp
         Left TimedOut -> E.throwIO T.TimeoutThread
         Right bs -> return bs
   where

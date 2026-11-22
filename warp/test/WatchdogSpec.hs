@@ -30,6 +30,7 @@ import Network.Socket.ByteString (recv, sendAll)
 import Network.Wai
 import Network.Wai.Handler.Warp
 import Network.Wai.Handler.Warp.Internal (
+    RecvGivenUp (..),
     ConnContext (..),
     makeServerState,
     makeWatchedRecv,
@@ -136,7 +137,7 @@ spec = describe "watchdog" $ do
                 mc `shouldBe` Just ()
 
     describe "makeWatchedRecv" $
-        it "ends as at end of input once connRecvGiveUp fires" $
+        it "throws RecvGivenUp once connRecvGiveUp fires" $
             E.bracket openFreePort (close . snd) $ \(port, lsock) ->
                 withSock port $ \_ -> E.bracket (fst <$> accept lsock) close $ \s -> do
                     cc <- newConnContext settings
@@ -148,7 +149,10 @@ spec = describe "watchdog" $ do
                     withAsync (makeWatchedRecv s pool ss cc) $ \r -> do
                         threadDelay 100_000
                         atomically $ writeTVar stop True
-                        timeout 1_000_000 (wait r) `shouldReturn` Just ""
+                        res <- timeout 1_000_000 (E.try (wait r))
+                        case res of
+                            Just (Left RecvGivenUp) -> return ()
+                            _ -> expectationFailure "not given up with RecvGivenUp"
 
 ----------------------------------------------------------------
 

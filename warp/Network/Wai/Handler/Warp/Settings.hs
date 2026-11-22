@@ -403,6 +403,8 @@ defaultShouldDisplayException se
     , et == ResourceVanished || et == InvalidArgument =
         False
     | isAsyncException se = False
+    -- A receive given up on, let out by a connection maker of the user's.
+    | Just RecvGivenUp <- fromException se = False
     -- An HTTP/2 peer which goes away or falls silent.
     | Just (e :: H2C.HTTP2Error) <- fromException se = case e of
         H2C.ConnectionIsClosed -> False

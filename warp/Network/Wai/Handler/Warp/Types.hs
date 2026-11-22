@@ -190,10 +190,11 @@ data ConnContext = ConnContext
     -- throwing 'T.TimeoutThread' when it gives up, is never left blocked
     -- in a send.
     , connRecvGiveUp :: TVar (STM ())
-    -- ^ What a receive of this connection gives up on, ending as at end of
-    -- input: nothing to begin with, the http2 library's once an HTTP\/2
-    -- connection is handed to it. 'Network.Wai.Handler.Warp.Internal.makeWatchedRecv'
-    -- reads it.
+    -- ^ What a receive of this connection gives up on: nothing to begin
+    -- with, the http2 library's once an HTTP\/2 connection is handed to it.
+    -- 'Network.Wai.Handler.Warp.Internal.makeWatchedRecv' reads it, and
+    -- throws 'RecvGivenUp' when it fires; the connection's own receive
+    -- ends as at end of input then.
     , connHandedOver :: TVar Bool
     -- ^ Whether the connection is the http2 library's, which drains it
     -- itself with GOAWAY when the server shuts down: a receive then no
@@ -254,6 +255,16 @@ readLeftoverSource :: Source -> IO ByteString
 readLeftoverSource (Source ref _) = readIORef ref
 
 ----------------------------------------------------------------
+
+-- | Thrown by 'Network.Wai.Handler.Warp.Internal.makeWatchedRecv' when a
+--   receive is given up on, by the shutdown or by 'connRecvGiveUp'.  Not an
+--   'IOException', so that a TLS backend does not take it for the peer's
+--   EOF, and close_notify can still be sent.
+--
+-- @since 3.5.0
+data RecvGivenUp = RecvGivenUp deriving (Show)
+
+instance E.Exception RecvGivenUp
 
 -- | What a connection maker hands warp for a connection it accepted:
 --   how to make the connection, and how to close what was accepted without
