@@ -56,6 +56,7 @@ module System.ThreadManager (
     countManaged,
 ) where
 
+import Control.Applicative ((<|>))
 import Control.Concurrent
 import Control.Concurrent.STM
 import Control.Exception (
@@ -260,7 +261,17 @@ killAll :: ThreadManager -> Either SomeException a -> IO ()
 killAll ThreadManager{..} ma = do
     ths <- Map.elems <$> readTVarIO managedThreads
     let ex = KilledByThreadManager $ either Just (const Nothing) ma
-    forM_ ths $ \(ManagedThread wtid ref) -> killWith again wtid ref ex
+    forM_ ths $ \(ManagedThread wtid ref) -> do
+        k <- readIORef ref
+        case k of
+            -- Its timeout's kill not taken yet: killed again once it has,
+            -- in case it takes that one and carries on.
+            Killing done -> do
+                taken <- isJust <$> tryReadMVar done
+                if taken
+                    then killWith again wtid ref ex
+                    else void $ forkIO $ readMVar done >> killWith again wtid ref ex
+            _ -> killWith again wtid ref ex
   where
     again (Killing done) = isJust <$> tryReadMVar done
     again _ = return False
@@ -567,7 +578,7 @@ recorded mgr final body =
     E.bracket (setup mgr) (mapM_ $ clear mgr) $ \mkey -> case mkey of
         Nothing -> final
         Just key@(_, ManagedThread _ ref) ->
-            (body key `E.finally` (finishing ref >> final))
+            (body key `E.finally` (finishing ref `E.finally` final))
                 `E.catch` \e@(KilledByThreadManager _) -> do
                     -- Only a kill of this manager's ends the thread quietly.
                     killed <- readIORef ref
@@ -577,16 +588,27 @@ recorded mgr final body =
 
 -- | No kill is decided on from here, and one decided on before is waited
 --   for, taken and caught here.  'readMVar' is interruptible, so it
---   arrives although this runs masked.
+--   arrives although this runs masked; another exception meanwhile is
+--   held until it has, and thrown then.  Uninterruptibly masked, the kill
+--   could never arrive, and it is not waited for.
 finishing :: IORef Kill -> IO ()
 finishing ref = do
     old <- atomicModifyIORef' ref $ \k -> case k of
         Alive -> (Finishing False, k)
         Killing _ -> (Finishing True, k)
         Finishing _ -> (k, k)
+    st <- E.getMaskingState
     case old of
-        Killing done -> readMVar done `E.catch` \(KilledByThreadManager _) -> return ()
+        Killing done | st /= E.MaskedUninterruptible -> await done Nothing
         _ -> return ()
+  where
+    await done other = do
+        r <- E.try $ readMVar done
+        case r of
+            Right () -> mapM_ E.throwIO other
+            Left e
+                | Just (KilledByThreadManager _) <- E.fromException e -> await done other
+                | otherwise -> await done (other <|> Just (e :: SomeException))
 
 -- | Recording this thread, or 'Nothing' once the manager has stopped.
 setup

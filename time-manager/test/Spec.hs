@@ -308,6 +308,22 @@ main = hspec $ do
             waitUntilAllGone tm
             ref `refShouldBe` True
 
+        it "runs the cleanup of a thread which took the kill only as it ended" $ do
+            tm <- newThreadManager
+            ready <- newEmptyMVar
+            gate <- newEmptyMVar
+            ref <- freshRef
+            forkManagedFinally
+                tm
+                "masked"
+                (E.uninterruptibleMask_ $ putMVar ready () >> takeMVar gate)
+                (I.writeIORef ref True)
+            takeMVar ready
+            stopAfter tm (return ()) $ \_ -> return ()
+            putMVar gate ()
+            waitUntilAllGoneFor tm 1_000_000 `shouldReturn` True
+            ref `refShouldBe` True
+
         it "kills again a thread which took its timeout's kill and carried on" $ do
             tm <- newThreadManager
             m <- initialize 10_000
