@@ -79,7 +79,7 @@ import Network.Wai.Handler.Warp.Watchdog
 -- (N.B. make sure the 'Settings' have an initialized 'ServerState' to guarantee
 -- a graceful shutdown)
 socketConnection :: Settings -> ConnContext -> Socket -> IO Connection
-socketConnection set cc s = do
+socketConnection set cc s = (`E.onException` close s) $ do
     (ss, _) <- makeServerState set
     bufferPool <- newBufferPool 2048 16384
     writeBuffer <- createWriteBuffer 16384
@@ -751,8 +751,13 @@ gracefulShutdown set counter = do
         Nothing ->
             waitForZero counter
         (Just seconds) ->
-            void $ waitForZeroFor counter $ seconds * microsPerSecond
+            void $ waitForZeroFor counter $ toMicros seconds
   where
+    -- Clamped: past about 35 minutes on 32 bits the product overflows.
+    toMicros seconds
+        | seconds <= 0 = 0
+        | seconds >= maxBound `div` microsPerSecond = maxBound
+        | otherwise = seconds * microsPerSecond
     microsPerSecond = 1_000_000
     setShuttingDown =
         case settingsServerState set of
