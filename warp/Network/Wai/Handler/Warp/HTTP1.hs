@@ -227,11 +227,19 @@ processRequest settings ii conn app th istatus src req mremainingRef idxhdr next
     -- the number of cores is small.
     Conc.yield
 
+    -- The rest of a body cut short by the shutdown, not by the peer, closes
+    -- the connection with nothing to report, as a request cut short does.
+    let quietIfDown act =
+            act `catch` \e -> case e of
+                ConnectionClosedByPeer -> do
+                    down <- maybe (return False) currentShuttingDownState $ settingsServerState settings
+                    if down then return CloseConnection else throwIO e
+                _ -> throwIO e
     if keepAlive
         then -- If there is an unknown or large amount of data to still be read
         -- from the request body, simple drop this connection instead of
         -- reading it all in to satisfy a keep-alive request.
-            case settingsMaximumBodyFlush settings of
+            quietIfDown $ case settingsMaximumBodyFlush settings of
                 Nothing -> do
                     flushEntireBody nextBodyFlush
                     return ReuseConnection

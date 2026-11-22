@@ -10,11 +10,12 @@ import Control.Concurrent.Async
 import qualified Control.Exception as E
 import Control.Exception (bracket)
 import Control.Monad (void)
+import qualified Data.ByteString as S
 import Data.IORef
 import Network.HTTP.Client
 import Network.HTTP.Types (ok200, status200)
 import Network.Socket
-import Network.Socket.ByteString (sendAll)
+import Network.Socket.ByteString (recv, sendAll)
 import Network.Wai (responseLBS)
 import Network.Wai.Handler.Warp
 import System.ThreadManager (KilledByThreadManager (..))
@@ -153,6 +154,36 @@ spec = describe "graceful shutdown" $ do
             timeout 2_000_000 (takeMVar servingNow) `shouldReturn` Nothing
             close client
 
+    it "ends a request cut short by the shutdown quietly, with no 400" $ do
+        stopSlot <- newEmptyMVar
+        thrown <- newIORef []
+        let settings =
+                setInstallShutdownHandler (putMVar stopSlot) $
+                    setOnException (\_ e -> atomicModifyIORef' thrown $ \es -> (show e : es, ())) defaultSettings
+            app _ respond = respond $ responseLBS status200 [] ""
+        bracket openFreePort (close . snd) $ \(testPort, sock) ->
+            withAsync (runSettingsSocket settings sock app) $ \server -> do
+                stopAccepting <- takeMVar stopSlot
+                client <- openConnection testPort
+                -- Part of the headers, which the server reads and waits on.
+                sendAll client "GET / HTTP/1.1\r\nHost: loc"
+                threadDelay 200_000
+                stopAccepting
+                timeout 5_000_000 (recvAll client) `shouldReturn` Just ""
+                timeout 5_000_000 (wait server) `shouldReturn` Just ()
+                readIORef thrown `shouldReturn` []
+                close client
+
+    describe "ends the rest of a body cut short by the shutdown quietly" $ do
+        let header = "POST / HTTP/1.1\r\nHost: localhost\r\n"
+        it "with a content length" $
+            bodyCutShort id $ header <> "Content-Length: 100\r\n\r\n0123456789"
+        it "chunked" $
+            bodyCutShort id $ header <> "Transfer-Encoding: chunked\r\n\r\n5\r\nhello\r\n"
+        it "with no limit to what is flushed" $
+            bodyCutShort (setMaximumBodyFlush Nothing) $
+                header <> "Content-Length: 100\r\n\r\n0123456789"
+
     it "serves the request in flight, then closes keep-alive connections and exits" $ do
         shutdownSignal <- newEmptyMVar
         allowResponse <- newEmptyMVar
@@ -216,6 +247,37 @@ spec = describe "graceful shutdown" $ do
         connect client $
             SockAddrInet (fromIntegral testPort) (tupleToHostAddress (127, 0, 0, 1))
         pure client
+    -- The application answers without reading the body, which is then
+    -- read to the end to keep the connection alive, until the shutdown.
+    bodyCutShort modify request = do
+        stopSlot <- newEmptyMVar
+        thrown <- newIORef []
+        let settings =
+                modify $
+                    setInstallShutdownHandler (putMVar stopSlot) $
+                        setOnException (\_ e -> atomicModifyIORef' thrown $ \es -> (show e : es, ())) defaultSettings
+            app _ respond = respond $ responseLBS status200 [("Content-Length", "2")] "ok"
+        bracket openFreePort (close . snd) $ \(testPort, sock) ->
+            withAsync (runSettingsSocket settings sock app) $ \server -> do
+                stopAccepting <- takeMVar stopSlot
+                client <- openConnection testPort
+                sendAll client request
+                timeout 5_000_000 (recvUntilBody client "") >>= (`shouldSatisfy` maybe False (S.isSuffixOf "\r\n\r\nok"))
+                -- The server waits for the rest of the body.
+                threadDelay 200_000
+                stopAccepting
+                timeout 5_000_000 (recvAll client) `shouldReturn` Just ""
+                timeout 5_000_000 (wait server) `shouldReturn` Just ()
+                readIORef thrown `shouldReturn` []
+                close client
+    recvUntilBody s acc
+        | "\r\n\r\nok" `S.isSuffixOf` acc = return acc
+        | otherwise = do
+            bs <- recv s 4096
+            if S.null bs then return acc else recvUntilBody s (acc <> bs)
+    recvAll s = do
+        bs <- recv s 4096
+        if S.null bs then return bs else (bs <>) <$> recvAll s
     -- set number of clients to the number of keep-alive connections
     numClients = managerConnCount defaultManagerSettings
     connectionRefused = \case

@@ -325,18 +325,11 @@ makeListener set socket = do
     closedAsStopped = E.handle $ \e ->
         if isClosedSocketError e then return Nothing else E.throwIO e
 
--- Closing the listening socket is how a server was stopped before there was
--- anything to tell, and callers that do it are still out there.  Waiting on
--- a descriptor that has been closed is an EBADF, under whichever name the IO
--- manager gives it, and it means the same thing the shutdown handler means:
--- stop accepting.  Ending the loop quietly is what happened before, and
--- 'closeListener' closing an already-closed socket is no error.
---
--- 'acceptNewConnection' says the same of the EBADF from accept() itself.
 -- | This installs a shutdown handler for the given socket and runs the
 -- default connection setup action, which handles plain (non-cipher) HTTP.
--- Running the handler stops the server accepting, closes the listening
--- socket, and gracefully shuts the live connections down.
+-- Calling the action handed to the handler stops the server accepting,
+-- closes the listening socket, and gracefully shuts the live connections
+-- down.
 --
 -- The supplied socket can be a Unix named socket, which
 -- can be used when reverse HTTP proxying into your application.
@@ -566,12 +559,12 @@ acceptConnection set listener getConnMaker app counter ii fdRef = do
                    | isFdExhaustion -> do
                         handleFdExhaustion e
                         acceptNewConnection'
-                     -- A graceful shutdown ends this loop by closing the
-                     -- listening socket, and that always arrives here as
-                     -- EBADF: 'close' replaces the descriptor with -1 before
-                     -- closing it, so every later accept() is handed -1 and
-                     -- fails that way. Matching EBADF alone therefore cannot
-                     -- miss a deliberate shutdown.
+                     -- A maker with no listener ('noListener') is stopped
+                     -- by its caller closing the socket it accepts on, and
+                     -- that arrives here as EBADF: 'close' replaces the
+                     -- descriptor with -1 before closing it, so every later
+                     -- accept() is handed -1 and fails that way.  A
+                     -- listener's own socket ends in 'closedAsStopped'.
                    | isIntentionallyClosedSocket -> do
                         resetFdExhaustion fdRef
                         settingsOnException set Nothing $ E.toException e

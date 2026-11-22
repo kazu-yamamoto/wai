@@ -24,7 +24,7 @@ import Data.Word8 (_0, _comma, _cr, _lf, _space, _tab, isDigit)
 #ifdef MIN_VERSION_crypton_x509
 import Data.X509
 #endif
-import Control.Exception (Exception, throwIO)
+import Control.Exception (Exception, catch, throwIO)
 import qualified Network.HTTP.Types as H
 import Network.Socket (SockAddr)
 import Network.Wai
@@ -42,8 +42,10 @@ import Network.Wai.Handler.Warp.Imports hiding (readInt)
 import Network.Wai.Handler.Warp.RequestHeader
 import Network.Wai.Handler.Warp.Settings (
     Settings,
+    currentShuttingDownState,
     settingsMaxTotalHeaderLength,
     settingsNoParsePath,
+    settingsServerState,
  )
 
 ----------------------------------------------------------------
@@ -78,7 +80,15 @@ recvRequest
     -- Body producing action used for flushing the request body
 recvRequest firstRequest settings conn cc ii th addr src transport = do
     let wd = connWatchdog cc
-    hdrlines <- headerLines (settingsMaxTotalHeaderLength settings) firstRequest src
+    -- A request not sent, or not sent whole, because the server is
+    -- shutting down ends the connection as a keep-alive one does, not as
+    -- the peer's fault: no 400 is sent for it.
+    hdrlines <-
+        headerLines (settingsMaxTotalHeaderLength settings) firstRequest src
+            `catch` \e -> case e of
+                ConnectionClosedByPeer -> quietIfDown e
+                IncompleteHeaders -> quietIfDown e
+                _ -> throwIO e
     (method, unparsedPath, path, query, httpversion, hdr) <-
         parseHeaderLines hdrlines
     let idxhdr = indexRequestHeader hdr
@@ -121,6 +131,10 @@ recvRequest firstRequest settings conn cc ii th addr src transport = do
                 , requestSendEarlyHints = \_ -> pure ()
                 }
     return (req, remainingRef, idxhdr, rbodyFlush)
+  where
+    quietIfDown e = do
+        down <- maybe (return False) currentShuttingDownState $ settingsServerState settings
+        if down then throwIO NoKeepAliveRequest else throwIO e
 
 ----------------------------------------------------------------
 

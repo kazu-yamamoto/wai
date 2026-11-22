@@ -22,18 +22,11 @@
 -- HTTP\/1.0, HTTP\/1.1 and HTTP\/2 are supported. For HTTP\/2,
 -- Warp supports direct and ALPN (in TLS) but not upgrade.
 --
--- Note on slowloris timeouts: to prevent slowloris attacks, timeouts are used
--- at various points in request receiving and response sending. One interesting
--- corner case is partial request body consumption; in that case, Warp's
--- timeout handling is still in effect, and the timeout will not be triggered
--- again. Therefore, it is recommended that once you start consuming the
--- request body, you either:
---
--- * consume the entire body promptly
---
--- * call the 'pauseTimeout' function
---
--- For more information, see <https://github.com/yesodweb/wai/issues/351>.
+-- Note on slowloris timeouts: each connection is supervised by a watchdog
+-- which times out a peer that does not send what it owes or does not read
+-- what it is sent, never an application that is slow to answer.  A request
+-- body partly consumed needs nothing more; 'pauseTimeout' is kept for
+-- compatibility and does nothing.
 module Network.Wai.Handler.Warp (
     -- * Run a Warp server
 
@@ -381,10 +374,6 @@ getGracefulShutdownTimeout = settingsGracefulShutdownTimeout
 -- socket\" action and should not be used as one: closing the socket is
 -- warp's to do, and when it does it is part of what stopping means.
 --
--- Except on Windows, and when warp is built against @network@ older than
--- 3.2.2, where warp cannot wait on a socket and the first argument closes
--- it directly, as it did before.
---
 -- Example usage:
 --
 -- @
@@ -397,8 +386,9 @@ getGracefulShutdownTimeout = settingsGracefulShutdownTimeout
 --
 -- Note that by default, the graceful shutdown mode lasts indefinitely
 -- (see 'setGracefulShutdownTimeout'). If you install a signal handler as above,
--- upon receiving that signal, the custom shutdown action will run /and/ all
--- outstanding requests will be handled.
+-- upon receiving that signal, the custom shutdown action will run /and/ the
+-- requests already being served will be finished; idle connections and
+-- requests not yet fully received are closed.
 --
 -- You may instead prefer to do one or both of the following:
 --
@@ -550,11 +540,15 @@ setServerPushLogger lgr y = y{settingsServerPushLogger = lgr}
 
 -- | Set the graceful shutdown timeout. A timeout of `Nothing' will
 -- wait indefinitely, and a number, if provided, will be treated as seconds
--- to wait for requests to finish, before shutting down the server entirely.
+-- to wait for requests to finish; the connections still there then are
+-- killed and given up to two seconds more to unwind.
 --
--- Graceful shutdown mode is entered when the server socket is closed; see
+-- Graceful shutdown mode is entered when the action handed to the
+-- shutdown handler is called, or the listening socket is closed; see
 -- 'setInstallShutdownHandler' for an example of how this could be done in
--- response to a UNIX signal.
+-- response to a UNIX signal.  'runSettingsConnection' and the like install
+-- no handler: for them, it is entered when their connection maker fails
+-- because its socket was closed.
 --
 -- @since 3.2.8
 setGracefulShutdownTimeout
@@ -592,10 +586,8 @@ setMaxBuilderResponseBufferSize maxRspBufSize settings = settings{settingsMaxBui
 setUnsafeClose :: Bool -> Settings -> Settings
 setUnsafeClose x y = y{settingsUnsafeClose = x}
 
--- | Explicitly pause the slowloris timeout.
---
--- This is useful for cases where you partially consume a request body. For
--- more information, see <https://github.com/yesodweb/wai/issues/351>
+-- | Kept for compatibility: it does nothing from 3.5.0, whose watchdog does
+-- not time an application out for consuming a request body partly.
 --
 -- @since 3.0.10
 pauseTimeout :: Request -> IO ()
