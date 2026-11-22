@@ -48,7 +48,7 @@ extra-deps:
   - git: https://github.com/kazu-yamamoto/http3
     commit: f68c895c53141bbae1a78d67716fed41d8ef4127
   - mlkem-0.2.2.0
-  - network-3.2.14.0
+  - network-3.2.15.0
   - network-control-0.2.0
   - ram-0.22.0
   - sockaddr-0.0.1

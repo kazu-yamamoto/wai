@@ -109,12 +109,7 @@ data Settings = Settings
     --
     -- @since 3.0.4
     , settingsAccept :: Socket -> IO (Socket, SockAddr)
-    -- ^ Code to accept a new connection.
-    --
-    -- Useful if you need to provide connected sockets from something other
-    -- than a standard accept call.
-    --
-    -- Default: 'defaultAccept'
+    -- ^ Not used any more: see 'Network.Wai.Handler.Warp.setAccept'.
     --
     -- @since 3.3.24
     , settingsNoParsePath :: Bool
@@ -244,6 +239,8 @@ data Settings = Settings
     --
     -- @since 3.4.21
     }
+
+{-# DEPRECATED settingsAccept "not used any more; see the documentation of setAccept" #-}
 
 -- | Specify usage of the PROXY protocol.
 data ProxyProtocol

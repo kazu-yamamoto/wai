@@ -31,7 +31,7 @@ extra-deps:
   - crypton-x509-system-1.10.1
   - crypton-x509-store-1.10.1
   - crypton-x509-1.10.3
-  - network-3.2.14.0
+  - network-3.2.15.0
   - network-control-0.2.0
   # TEMPORARY: unreleased http-semantics, http2, quic and http3 from git.
   # Revert to Hackage versions before merging.

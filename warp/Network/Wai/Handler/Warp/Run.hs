@@ -44,7 +44,7 @@ import Network.Socket (
     isClosedSocketError,
     isTransientAcceptError,
     unsafeClose,
-    withReadable,
+    acceptWith,
     setSocketOption,
     withSocketsDo,
  )
@@ -297,7 +297,7 @@ makeListener set socket = do
     return
         Listener
             { acceptOrStop = closedAsStopped $ do
-                r <- withReadable socket (told stopping) $ settingsAccept set socket
+                r <- acceptWith socket (told stopping)
                 return $ either (const Nothing) Just r
             , closeListener = unsafeClose socket
             }
@@ -329,6 +329,9 @@ makeListener set socket = do
 --
 -- Note that the 'settingsPort' will still be passed to 'Application's via the
 -- 'serverPort' record.
+--
+-- The socket has to be listening: one which is not ends the server quietly
+-- on Linux and is waited on for good on macOS.
 runSettingsSocket :: Settings -> Socket -> Application -> IO ()
 runSettingsSocket oldSettings socket app = do
     listener <- makeListener oldSettings socket

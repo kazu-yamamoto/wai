@@ -267,7 +267,7 @@ getSessionManager TLSSettings{..} = case tlsSessionManagerConfig of
     Just config -> SM.newSessionManager config
 
 -- | Running 'Application' with 'TLSSettings' and 'Settings' using
---   specified 'Socket'.
+--   specified 'Socket', which has to be listening.
 runTLSSocket :: TLSSettings -> Settings -> Socket -> Application -> IO ()
 runTLSSocket tlsset set sock app = do
 #if MIN_VERSION_warp(3,4,18)

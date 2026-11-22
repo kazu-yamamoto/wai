@@ -18,8 +18,13 @@ import GHC.IO.Exception (IOException (..))
 import HTTP (responseBody, sendGET)
 import Network.HTTP.Types (status200)
 import Network.Socket
-import Network.Wai (responseLBS)
+import Network.Wai (Application, responseLBS)
 import Network.Wai.Handler.Warp
+import Network.Wai.Handler.Warp.Internal (
+    makeServerState,
+    runSettingsConnectionMaker,
+    socketConnection,
+ )
 import System.Timeout (timeout)
 import Test.Hspec
 
@@ -34,21 +39,14 @@ failedWith (Errno wanted) e = case fromException e of
     Nothing -> False
 
 -- Run a server on an ephemeral port and report how runSettingsSocket ended.
---
--- The caller supplies the accept action, so a test can make accept() fail with
--- an errno of its choosing, and an action to run once the server is up.
 runServerUntil
-    :: (Socket -> IO (Socket, SockAddr))
-    -> (Socket -> IO () -> IO ())
+    :: (Socket -> IO () -> IO ())
     -> IO (Either SomeException ())
-runServerUntil accept' end = do
+runServerUntil end = do
     shutdownSlot <- newEmptyMVar
-    let application _ respond = respond (responseLBS status200 [] "ok")
-        settings =
-            setAccept accept' $
-                setOnException (\_ _ -> return ()) $
-                    setInstallShutdownHandler (putMVar shutdownSlot) defaultSettings
-
+    let settings =
+            setOnException (\_ _ -> return ()) $
+                setInstallShutdownHandler (putMVar shutdownSlot) defaultSettings
     bracket openListenSocket close $ \sock -> do
         outcome <- newEmptyMVar
         _ <- forkIO $ do
@@ -58,32 +56,44 @@ runServerUntil accept' end = do
         threadDelay 200_000
         end sock closeListenSocket
         takeMVar outcome
-  where
-    openListenSocket = do
-        sock <- socket AF_INET Stream defaultProtocol
-        setSocketOption sock ReuseAddr 1
-        bind sock (SockAddrInet 0 (tupleToHostAddress (127, 0, 0, 1)))
-        listen sock 5
-        return sock
 
--- Put one connection on the listening socket's queue and drop it.
---
--- The accept loop waits for the socket to have something to accept before
--- it calls 'settingsAccept', so an accept action that fails without
--- touching the socket -- which is how these tests make accept() fail -- is
--- never reached on a socket nobody has connected to.  This holds on
--- Windows too since network 4, which waits for readiness under WinIO; with
--- network 3.2 the connection is simply never accepted.
-nudge :: Socket -> IO ()
-nudge listenSock = do
-    sa <- getSocketName listenSock
-    bracket (socket AF_INET Stream defaultProtocol) close $ \s -> connect s sa
+-- Run a server whose connections are made by an accept action of the
+-- caller's, as 'setAccept' documents, so that a test can make accept()
+-- fail with an errno of its choosing, and report how the server ended.
+runAcceptUntil
+    :: (Socket -> IO (Socket, SockAddr))
+    -> (Socket -> IO ())
+    -> IO (Either SomeException ())
+runAcceptUntil accept' end = do
+    (_, settings) <- makeServerState $ setOnException (\_ _ -> return ()) defaultSettings
+    let getConnMaker sock = do
+            (s, sa) <- accept' sock
+            return (\cc -> socketConnection settings cc s, sa)
+    bracket openListenSocket close $ \sock -> do
+        outcome <- newEmptyMVar
+        _ <- forkIO $ do
+            r <- try (runSettingsConnectionMaker settings (getConnMaker sock) application)
+            putMVar outcome r
+        threadDelay 200_000
+        end sock
+        takeMVar outcome
+
+application :: Application
+application _ respond = respond (responseLBS status200 [] "ok")
+
+openListenSocket :: IO Socket
+openListenSocket = do
+    sock <- socket AF_INET Stream defaultProtocol
+    setSocketOption sock ReuseAddr 1
+    bind sock (SockAddrInet 0 (tupleToHostAddress (127, 0, 0, 1)))
+    listen sock 5
+    return sock
 
 spec :: Spec
 spec = do
     describe "a listener that goes away" $ do
         it "ends the accept loop quietly when the socket is closed on purpose" $ do
-            r <- runServerUntil accept $ \_ closeListenSocket -> closeListenSocket
+            r <- runServerUntil $ \_ closeListenSocket -> closeListenSocket
             case r of
                 Right () -> return ()
                 Left e -> expectationFailure $ "graceful shutdown threw: " <> show e
@@ -93,7 +103,7 @@ spec = do
         -- what 'setInstallShutdownHandler' hands it.  Waiting on a closed
         -- descriptor means the same thing as being told to stop.
         it "ends the accept loop quietly when the caller closes the socket itself" $ do
-            r <- runServerUntil accept $ \sock _ -> close sock
+            r <- runServerUntil $ \sock _ -> close sock
             case r of
                 Right () -> return ()
                 Left e -> expectationFailure $ "closing the listener threw: " <> show e
@@ -104,7 +114,7 @@ spec = do
         -- to stop, so whatever supervises it never learns that it is dead.
         it "rethrows when accept fails for a reason nobody asked for" $ do
             let failingAccept _ = ioError (errnoToIOError "accept" eNFILE Nothing Nothing)
-            r <- runServerUntil failingAccept $ \sock _ -> nudge sock
+            r <- runAcceptUntil failingAccept $ \_ -> return ()
             case r of
                 Left e
                     | failedWith eNFILE e -> return ()
@@ -113,7 +123,7 @@ spec = do
                 Right () ->
                     expectationFailure $
                         unwords
-                            [ "runSettingsSocket returned normally after accept() failed,"
+                            [ "the server returned normally after accept() failed,"
                             , "so a lost listener looks just like a clean shutdown"
                             ]
 
@@ -127,14 +137,17 @@ spec = do
                         then ioError (errnoToIOError "accept" eNETDOWN Nothing Nothing)
                         else accept sock
             served <- newIORef Nothing
-            r <- runServerUntil flakyAccept $ \sock closeListenSocket -> do
+            -- Well before the watchdog's 30 seconds: the keep-alive
+            -- connection left open has to see the shutdown.
+            r <- timeout 5_000_000 $ runAcceptUntil flakyAccept $ \sock -> do
                 port <- socketPort sock
                 body <-
                     try $
                         responseBody
                             <$> sendGET ("http://127.0.0.1:" ++ show port ++ "/")
                 writeIORef served (Just (body :: Either SomeException BL.ByteString))
-                closeListenSocket
+                -- Ends this server, which has no shutdown handler.
+                close sock
             outcome <- readIORef served
             case outcome of
                 Just (Right body) -> body `shouldBe` "ok"
@@ -147,8 +160,9 @@ spec = do
                             ]
                 Nothing -> expectationFailure "the request was never made"
             case r of
-                Right () -> return ()
-                Left e -> expectationFailure $ "graceful shutdown threw: " <> show e
+                Just (Right ()) -> return ()
+                Just (Left e) -> expectationFailure $ "graceful shutdown threw: " <> show e
+                Nothing -> expectationFailure "the keep-alive connection held the shutdown up"
 
         -- eOPNOTSUPP is a queued-connection error in accept(2) and also what a
         -- listening socket that is not SOCK_STREAM answers. The two are
@@ -157,7 +171,7 @@ spec = do
         it "rethrows rather than spinning when the socket cannot accept" $ do
             let unsupportedAccept _ =
                     ioError (errnoToIOError "accept" eOPNOTSUPP Nothing Nothing)
-            r <- timeout 5_000_000 $ runServerUntil unsupportedAccept $ \sock _ -> nudge sock
+            r <- timeout 5_000_000 $ runAcceptUntil unsupportedAccept $ \_ -> return ()
             case r of
                 Nothing -> expectationFailure "the accept loop spun instead of giving up"
                 Just (Left e)
@@ -166,4 +180,4 @@ spec = do
                         expectationFailure $ "expected the EOPNOTSUPP from accept(), got: " <> show e
                 Just (Right ()) ->
                     expectationFailure
-                        "runSettingsSocket returned normally on a socket that cannot accept"
+                        "the server returned normally on a socket that cannot accept"

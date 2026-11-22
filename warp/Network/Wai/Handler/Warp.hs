@@ -453,14 +453,30 @@ setFork fork' s = s{settingsFork = fork'}
 
 -- | Code to accept a new connection.
 --
--- Useful if you need to provide connected sockets from something other
--- than a standard accept call.
+-- Not used any more: warp accepts with network's @acceptWith@, which the
+-- shutdown can stop while it waits.  To make connections some other way,
+-- run the server with 'runSettingsConnectionMaker' and a connection maker
+-- of your own, all from "Network.Wai.Handler.Warp.Internal".  The server
+-- state is made first, so that the connections see the shutdown:
 --
--- Default: 'defaultAccept'
+-- @
+-- serve :: Settings -> Socket -> Application -> IO ()
+-- serve settings0 listenSock app = do
+--     (_, settings) <- 'makeServerState' settings0
+--     let getConnMaker = do
+--             (s, sa) <- 'Network.Socket.accept' listenSock -- or connect out
+--             -- what was done after accepting goes here
+--             return (\\cc -> 'socketConnection' settings cc s, sa)
+--     'runSettingsConnectionMaker' settings getConnMaker app
+-- @
+--
+-- That server installs no shutdown handler, and stops once the connection
+-- maker throws, as when the listening socket is closed.
 --
 -- @since 3.3.24
 setAccept :: (Socket -> IO (Socket, SockAddr)) -> Settings -> Settings
 setAccept accept' s = s{settingsAccept = accept'}
+{-# DEPRECATED setAccept "not used any more; see its documentation for runSettingsConnectionMaker" #-}
 
 -- | Do not use the PROXY protocol.
 --

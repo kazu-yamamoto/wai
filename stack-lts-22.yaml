@@ -36,7 +36,7 @@ extra-deps:
     commit: ee8038f7b4603f633f271b26b58328ae9382caa3
   - git: https://github.com/kazu-yamamoto/http2
     commit: 760dae5bc803208079d36ff6fa4117d5c6dcd1e1
-  - network-3.2.14.0
+  - network-3.2.15.0
   - network-control-0.2.0
   - random-1.3.1
   - tls-2.1.11
