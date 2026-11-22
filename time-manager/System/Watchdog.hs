@@ -102,7 +102,9 @@ import Data.Word (Word64)
 import GHC.Clock (getMonotonicTimeNSec)
 import GHC.Conc.Sync (labelThread, myThreadId)
 
-#if !defined(mingw32_HOST_OS)
+#if defined(mingw32_HOST_OS)
+import qualified System.TimeManager.Windows as EV
+#else
 import qualified GHC.Event as EV
 #endif
 
@@ -129,7 +131,7 @@ class WatchdogFor a where
     --
     --   It runs on the watchdog's thread and must return at once: while
     --   it blocks nothing times out, and 'withWatchdog' cannot return.
-    --   An exception from it ends the supervision of the task.
+    --   A synchronous exception from it times the task out.
     decide :: Maybe (ContextFor a) -> ContextFor a -> IO Action
 
 -- | What the watchdog does with the timeout it is running.
@@ -149,16 +151,19 @@ ignore :: Action
 ignore = Ignore
 
 -- | Start the timeout again with this many microseconds. Zero times out
---   at once.
+--   at once.  A task which times out is given a quarter of the timeout,
+--   from a tenth of a second to a second, to finish by itself before the
+--   last resort.
 setTimeout :: Word64 -> Action
 setTimeout = SetTimeout
 
 -- | 'setTimeout', but asking the peer for a sign of life first: once
---   half of it has passed with nothing recorded, the probe runs, once.
+--   half of it has passed with nothing recorded that restarts the
+--   timeout, the probe runs, once.
 --   A protocol sends a PING there, whose answer the task records, so a
 --   live peer never times out. The probe runs on the watchdog's thread
 --   and must return at once, as 'decide' must: enqueue the PING, say.
---   An exception from it ends the supervision of the task.
+--   A synchronous exception from it times the task out.
 setTimeoutProbing :: Word64 -> IO () -> Action
 setTimeoutProbing = SetTimeoutProbing
 
@@ -171,7 +176,10 @@ unlimited = Unlimited
 abort :: Action
 abort = Abort
 
--- | Time out now. The same as @'setTimeout' 0@.
+-- | Time out now.  Unlike @'setTimeout' 0@, the time the task is then
+--   given to finish by itself follows the last timeout set: a quarter of
+--   it, from a tenth of a second to a second, or a second if there was
+--   none.
 timedOut :: Action
 timedOut = TimedOut
 
@@ -264,7 +272,8 @@ data Event = Stop | Changed | Expired
 --   out, the second argument is run as the last resort, typically
 --   throwing an exception to the thread running the body.  One under way
 --   as the body ends is waited for here, and what it throws is thrown
---   from here, even after a body which returned.
+--   from here, even after a body which returned, unless this is called
+--   uninterruptibly masked: then it is not waited for.
 withWatchdog :: WatchdogFor a => Watchdog a -> IO () -> IO b -> IO b
 withWatchdog wd lastResort body = E.mask $ \restore -> do
     done <- newTVarIO False
@@ -343,8 +352,9 @@ watchdog wd lastResort done = do
                 atomically $ writeTVar (wdTimedOut wd) True
                 -- The same interval is how long the task is given
                 -- to finish by itself before it is given up on, whatever it
-                -- does meanwhile.
-                quiet <- waitFor Nothing $ Just $ interval budget
+                -- does meanwhile: a tenth of a second at least, or a zero
+                -- or tiny timeout would leave it next to none.
+                quiet <- waitFor Nothing $ Just $ max 100_000 $ interval budget
                 case quiet of
                     Stop -> return ()
                     _ -> lastResort
@@ -415,16 +425,14 @@ toMicros ns = fromIntegral $ max 1 $ min cap $ ns `div` 1000
 --   passed. The timer is cancelled when the body finishes.
 withTimer :: Maybe Int -> (STM () -> IO a) -> IO a
 withTimer Nothing body = body retry
-#if defined(mingw32_HOST_OS)
-withTimer (Just t) body = do
-    var <- registerDelay t
-    body (readTVar var >>= check)
-#else
 withTimer (Just t) body = do
     var <- newTVarIO False
+#if defined(mingw32_HOST_OS)
+    mgr <- EV.getSystemManager
+#else
     mgr <- EV.getSystemTimerManager
+#endif
     E.bracket
         (EV.registerTimeout mgr t $ atomically $ writeTVar var True)
         (EV.unregisterTimeout mgr)
         $ \_ -> body (readTVar var >>= check)
-#endif

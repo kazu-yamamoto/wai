@@ -20,6 +20,7 @@ import qualified GHC.Event as EV
 import Control.Concurrent (
     MVar,
     forkIO,
+    killThread,
     myThreadId,
     newEmptyMVar,
     putMVar,
@@ -235,6 +236,23 @@ main = hspec $ do
                         putMVar cleaned . fmap show
             either (\(E.SomeException _) -> True) (const False) r `shouldBe` True
             takeMVar cleaned `shouldReturn` Just (show $ userError "action")
+
+        it "is ended by an exception in the grace, killing and cleaning up first" $ do
+            tm <- newThreadManager
+            started <- newEmptyMVar
+            forkManaged tm "probe" $ putMVar started () >> threadDelay 10_000_000
+            takeMVar started
+            cleaned <- newEmptyMVar
+            stopping <- newEmptyMVar
+            stopper <- forkIO $ do
+                r <- E.try $ stopAfterWithGrace tm 10_000_000 (return ()) $ \_ -> putMVar cleaned ()
+                putMVar stopping (either (\e -> show (e :: E.SomeException)) (const "returned") r)
+            threadDelay 100_000
+            -- Not held off until the grace is over.
+            Timeout.timeout 1_000_000 (killThread stopper) `shouldReturn` Just ()
+            Timeout.timeout 1_000_000 (takeMVar stopping) `shouldReturn` Just (show E.ThreadKilled)
+            takeMVar cleaned `shouldReturn` ()
+            waitUntilAllGoneFor tm 1_000_000 `shouldReturn` True
 
         it "says when the threads are not gone in time" $ do
             tm <- newThreadManager

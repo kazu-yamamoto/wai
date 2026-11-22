@@ -5,7 +5,8 @@
 -- | Timeout manager. Since @v0.3.0@, timeout manager is a wrapper of
 -- GHC System TimerManager, except on Windows, where it has a timer of
 -- its own: the one in @GHC.Event.Windows@ belongs to WinIO and never
--- runs under the I\/O manager which is still the default there.
+-- runs in a program not using WinIO (the default), which has no I\/O
+-- manager.
 --
 -- Some caveats of using this package:
 --

@@ -192,12 +192,15 @@ instance Exception KilledByThreadManager where
 --   told by the caller's own means, or stopped with 'stopAfterWithGrace'
 --   inside: a thread that one has killed is not killed again here.
 --
+--   An exception arriving meanwhile ends the wait, and is thrown from
+--   here in place of the action's result.
+--
 -- @since 0.5.3
 withThreadManager :: Int -> (ThreadManager -> IO a) -> IO a
 withThreadManager cap action = do
     mgr <- newThreadManager
     stopAfterWithResult mgr (action mgr) $ \r -> do
-        void $ E.uninterruptibleMask_ $ waitUntilAllGoneFor mgr cap
+        void $ waitUntilAllGoneFor mgr cap
         either E.throwIO return r
 
 -- | Stopping the manager.
@@ -279,6 +282,10 @@ killAll ThreadManager{..} ma = do
 -- 'waitStoppingSTM' alongside what they wait for.  Threads running code
 -- which knows nothing of it are better stopped with 'stopAfter'.
 --
+-- An exception arriving in the grace ends it: the threads still there are
+-- killed then, the cleanup runs, still given the action's outcome, and that
+-- exception is thrown from here in place of the action's result.
+--
 -- @since 0.5.3
 stopAfterWithGrace
     :: ThreadManager -> Int -> IO a -> (Maybe SomeException -> IO ()) -> IO a
@@ -286,13 +293,14 @@ stopAfterWithGrace mgr@ThreadManager{..} grace action cleanup =
     E.mask $ \unmask -> do
         ma <- E.try $ unmask action
         atomically $ writeTVar managerStopped True
-        -- Not interrupted, the wait being bounded by the grace: an
-        -- exception landing in it would skip the last resort.
-        E.uninterruptibleMask_ $ do
-            gone <- waitUntilAllGoneFor mgr grace
-            unless gone $ killAll mgr ma
+        -- An exception landing in the grace ends it, and is thrown once
+        -- the last resort and the cleanup have run.
+        waited <- E.try (waitUntilAllGoneFor mgr grace) :: IO (Either SomeException Bool)
+        case waited of
+            Right True -> return ()
+            _ -> killAll mgr ma
         cleanup $ either Just (const Nothing) ma
-        either E.throwIO return ma
+        either E.throwIO (const $ either E.throwIO return ma) waited
 
 -- | Succeeding once the manager has been stopped, by 'stopAfter' or
 --   'stopAfterWithGrace'.  A managed thread waits for this alongside what
@@ -371,8 +379,11 @@ forkManagedUnmaskFinally mgr label io final =
 --   A place is kept for the thread before the fork, so that it counts
 --   towards 'countManaged' from here rather than from the moment the
 --   thread starts, and the place is given back whether the fork makes the
---   thread or throws.  A caller which forks by itself can do the same
---   with 'reserveManaged' and 'takeReservation', which this is made of.
+--   thread or throws.  A thread can belong to a manager only once at a
+--   time: do not pass a fork which runs the action in the calling thread
+--   from a thread this manager already owns.  A caller which forks by
+--   itself can do the same with 'reserveManaged' and 'takeReservation',
+--   which this is made of.
 forkManagedBy
     :: ThreadManager
     -> (((forall x. IO x -> IO x) -> IO ()) -> IO a)
