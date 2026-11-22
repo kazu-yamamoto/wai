@@ -1,6 +1,7 @@
 {-# LANGUAGE CPP #-}
 {-# LANGUAGE NumericUnderscores #-}
 {-# LANGUAGE RecordWildCards #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE StandaloneDeriving #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE NoMonoLocalBinds #-}
@@ -88,14 +89,20 @@ main = hspec $ do
             (r, probes) <- probing True
             r `shouldBe` Nothing
             probes `shouldSatisfy` (>= 2)
+        it "times out a task whose probe fails" $ do
+            wd <- newWatchdog $ Probed $ throwIO $ userError "probe"
+            r <- withWatchdog wd (return ()) $
+                Timeout.timeout 1_000_000 $ atomically $ timedOutSTM wd
+            r `shouldBe` Just ()
+
         it "times out a task whose peer does not answer, after one probe" $ do
             (r, probes) <- probing False
             r `shouldBe` Just ()
             probes `shouldBe` 1
     describe "ThreadManager, once stopped" $ do
         -- 'setup' refuses to record a thread forked before the stop and
-        -- scheduled after it, by throwing.  That must not escape the fork,
-        -- and must not take the cleanup with it.
+        -- scheduled after it.  That must not escape the fork, and must not
+        -- take the cleanup with it.
         it "does not let forkManagedTimeout's refusal escape the fork" $ do
             tm <- newThreadManager
             stopAfter tm (return ()) $ \_ -> return ()
@@ -277,6 +284,77 @@ main = hspec $ do
             waitUntilAllGone tm
             ref `refShouldBe` True
 
+        it "stops at once, a thread which cannot take the kill notwithstanding" $ do
+            tm <- newThreadManager
+            ready <- newEmptyMVar
+            release <- newEmptyMVar
+            forkManaged tm "masked" $
+                E.uninterruptibleMask_ $ putMVar ready () >> takeMVar release
+            takeMVar ready
+            m <- forkManagedWithResult tm "probe" $ threadDelay 10_000_000
+            t0 <- getMonotonicTimeNSec
+            stopAfter tm (return ()) $ \_ -> return ()
+            t1 <- getMonotonicTimeNSec
+            (t1 - t0) `shouldSatisfy` (< 500_000_000)
+            r <- atomically $ waitManagedSTM m
+            either (isJust . (E.fromException :: E.SomeException -> Maybe KilledByThreadManager)) (const False) r
+                `shouldBe` True
+            putMVar release ()
+
+        it "does not cut a cleanup short with its kill" $ do
+            tm <- newThreadManager
+            entered <- newEmptyMVar
+            ref <- freshRef
+            forkManagedFinally tm "probe" (return ()) $ do
+                putMVar entered ()
+                threadDelay 200_000
+                I.writeIORef ref True
+            takeMVar entered
+            stopAfter tm (return ()) $ \_ -> return ()
+            waitUntilAllGone tm
+            ref `refShouldBe` True
+
+        it "runs the cleanup of a thread which took the kill only as it ended" $ do
+            tm <- newThreadManager
+            ready <- newEmptyMVar
+            gate <- newEmptyMVar
+            ref <- freshRef
+            forkManagedFinally
+                tm
+                "masked"
+                (E.uninterruptibleMask_ $ putMVar ready () >> takeMVar gate)
+                (I.writeIORef ref True)
+            takeMVar ready
+            stopAfter tm (return ()) $ \_ -> return ()
+            putMVar gate ()
+            waitUntilAllGoneFor tm 1_000_000 `shouldReturn` True
+            ref `refShouldBe` True
+
+        it "does not kill again a thread a stop inside has killed" $ do
+            ref <- freshRef
+            withThreadManager 2_000_000 $ \outer ->
+                stopAfterWithGrace outer 50_000 (do
+                    forkManaged outer "probe" $
+                        threadDelay 10_000_000
+                            `finally` (threadDelay 300_000 >> I.writeIORef ref True)
+                    threadDelay 50_000) $ \_ -> return ()
+            ref `refShouldBe` True
+
+        it "does not cut the cleanup of a thread its timeout has killed" $ do
+            tm <- newThreadManager
+            m <- initialize 10_000
+            unwinding <- newEmptyMVar
+            ref <- freshRef
+            forkManagedTimeout tm m "probe" $ \_ ->
+                threadDelay 10_000_000 `finally` do
+                    putMVar unwinding ()
+                    threadDelay 300_000
+                    I.writeIORef ref True
+            takeMVar unwinding
+            stopAfter tm (return ()) $ \_ -> return ()
+            waitUntilAllGoneFor tm 2_000_000 `shouldReturn` True
+            ref `refShouldBe` True
+
         -- A thread timed out while it cannot take the kill must not hold up
         -- the system timer manager, which every 'threadDelay' waits on.
         it "does not stop the timers on a masked thread timing out" $ do
@@ -364,6 +442,18 @@ main = hspec $ do
                     Left TimeoutThread -> I.atomicModifyIORef' escaped $ \n -> (n + 1, ())
                     Right () -> pure ()
             I.readIORef escaped `shouldReturn` 0
+
+        -- Nested, each catches only its own timer's kill.
+        it "withHandleKillThread: an inner one lets the outer one's kill through" $ do
+            outer <- initialize 50_000
+            inner <- initialize 1_000_000
+            reached <- freshRef
+            withHandleKillThread outer (return ()) $ \_ -> do
+                withHandleKillThread inner (return ()) $ \_ ->
+                    threadDelay 2_000_000
+                -- Reached only if the inner one swallowed the outer kill.
+                I.writeIORef reached True
+            reached `refShouldBe` False
 
         -- Likewise, the timeout action must not run once
         -- 'withHandleKillThread' has returned.

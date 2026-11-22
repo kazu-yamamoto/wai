@@ -58,6 +58,7 @@ import Control.Concurrent (
     putMVar,
     readMVar,
  )
+import Control.Applicative ((<|>))
 import qualified Control.Exception as E
 import Control.Monad (unless, void, when)
 import Data.Bits (shiftR)
@@ -136,8 +137,10 @@ withHandle mgr onTimeout action
 -- | Registering a timeout action of killing this thread and
 --   unregister its handle when the body action is killed or finished.
 --
---   'TimeoutThread' never escapes: a kill decided on as the body ends is
---   waited for and caught here, rather than landing after this returns.
+--   'TimeoutThread' never escapes, unless this is called uninterruptibly
+--   masked: a kill decided on as the body ends is waited for and caught
+--   here, rather than landing after this returns.  Only this timer's kill
+--   is caught: an enclosing one's goes on to it.
 withHandleKillThread :: Manager -> TimeoutAction -> (Handle -> IO ()) -> IO ()
 withHandleKillThread mgr onTimeout action
     | isNoManager mgr = action emptyHandle
@@ -147,6 +150,11 @@ withHandleKillThread mgr onTimeout action
         -- thread, to leave without being killed.
         claimed <- I.newIORef False
         delivered <- newEmptyMVar
+        -- Whether this timer's kill was sent, and whether it was taken
+        -- here: only that one is caught, once; one of an enclosing
+        -- 'withHandleKillThread' goes on to it.
+        fired <- I.newIORef False
+        swallowed <- I.newIORef False
         let tryClaim = I.atomicModifyIORef' claimed $ \b -> (True, not b)
             kill =
                 (deRefWeak wtid >>= mapM_ (`E.throwTo` TimeoutThread))
@@ -156,17 +164,43 @@ withHandleKillThread mgr onTimeout action
             -- action runs on the system timer manager's thread.
             onTimeout' = do
                 won <- tryClaim
-                when won $ onTimeout `E.finally` void (forkIO kill)
+                when won $ do
+                    I.writeIORef fired True
+                    onTimeout `E.finally` void (forkIO kill)
+            ours = do
+                f <- I.readIORef fired
+                if f
+                    then I.atomicModifyIORef' swallowed $ \b -> (True, not b)
+                    else return False
+            -- Claimed before the cancel, which can be interrupted: the
+            -- timer then finds it claimed and does nothing.
             leave h = do
-                cancel h
                 won <- tryClaim
-                -- Lost: the kill is on its way.  It is taken here, where it
-                -- is caught.  'readMVar' is interruptible, so it arrives even
-                -- though this runs masked.
-                unless won $ readMVar delivered `E.catch` ignore
+                if won
+                    then cancel h
+                    else do
+                        -- Lost: the kill is on its way.  It is taken here,
+                        -- where it is caught.  'readMVar' is interruptible,
+                        -- so it arrives even though this runs masked; what
+                        -- else arrives meanwhile is held until it has, and
+                        -- thrown then.  Uninterruptibly masked, it could
+                        -- never arrive, and it is not waited for.
+                        st <- E.getMaskingState
+                        unless (st == E.MaskedUninterruptible) $
+                            awaitKill delivered Nothing
+            awaitKill dlv held = do
+                r <- E.try $ readMVar dlv
+                case r of
+                    Right () -> mapM_ E.throwIO held
+                    Left e
+                        | Just TimeoutThread <- E.fromException e -> do
+                            mine <- ours
+                            awaitKill dlv $ if mine then held else held <|> Just e
+                        | otherwise -> awaitKill dlv (held <|> Just (e :: E.SomeException))
+            ignore TimeoutThread = do
+                mine <- ours
+                unless mine $ E.throwIO TimeoutThread
         E.handle ignore $ E.bracket (register mgr onTimeout') leave action
-  where
-    ignore TimeoutThread = pure ()
 
 ----------------------------------------------------------------
 

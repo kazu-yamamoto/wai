@@ -94,7 +94,7 @@ module System.Watchdog (
 ) where
 
 import Control.Applicative ((<|>))
-import Control.Concurrent (forkIO)
+import Control.Concurrent (forkIOWithUnmask)
 import Control.Concurrent.STM
 import qualified Control.Exception as E
 import Control.Monad (void)
@@ -243,10 +243,11 @@ decided wd = do
 --   watchdog.
 --
 --   This watchdog stops: its thread ends, 'timedOutSTM' never succeeds
---   again, and the last resort given to 'withWatchdog' does not run --
---   not even if it had decided a moment before, because that decision
---   was about a task this watchdog no longer watches. 'update'ing
---   afterwards does nothing.
+--   again, and the last resort given to 'withWatchdog' is not started
+--   from here on, because a decision about a task this watchdog no longer
+--   watches is no use.  One already started may still land, inside
+--   'withWatchdog', which waits for it.  'update'ing afterwards does
+--   nothing.
 --
 --   There is no way back. Once a task is handed over, it's done.
 handOver :: Watchdog a -> IO ()
@@ -261,26 +262,52 @@ data Event = Stop | Changed | Expired
 --
 --   If the task has not finished by itself a while after it timed
 --   out, the second argument is run as the last resort, typically
---   throwing an exception to the thread running the body.
+--   throwing an exception to the thread running the body.  One under way
+--   as the body ends is waited for here, and what it throws is thrown
+--   from here, even after a body which returned.
 withWatchdog :: WatchdogFor a => Watchdog a -> IO () -> IO b -> IO b
-withWatchdog wd lastResort body = do
+withWatchdog wd lastResort body = E.mask $ \restore -> do
     done <- newTVarIO False
     finished <- newTVarIO False
-    void $ forkIO $ do
+    void $ forkIOWithUnmask $ \unmask -> do
         myThreadId >>= \me -> labelThread me "watchdog"
-        watchdog wd lastResort done
+        unmask (watchdog wd lastResort done)
             `E.finally` atomically (writeTVar finished True)
-    body `E.finally` do
+    restore body `E.finally` do
         atomically $ writeTVar done True
-        -- The last resort may be on its way.
-        atomically $ readTVar finished >>= check
+        -- The last resort may be on its way: it lands in this wait, which
+        -- is interruptible for it.  Whatever arrives meanwhile is held
+        -- until the watchdog has finished, and the first thrown then.
+        awaiting finished Nothing
+
+-- | Waiting for the watchdog thread to finish, holding what arrives.
+--   Uninterruptibly masked, a last resort throwing to this thread could
+--   never arrive, and the watchdog is not waited for.
+awaiting :: TVar Bool -> Maybe E.SomeException -> IO ()
+awaiting finished held = do
+    st <- E.getMaskingState
+    if st == E.MaskedUninterruptible
+        then mapM_ E.throwIO held
+        else do
+            r <- E.try $ atomically $ readTVar finished >>= check
+            case r of
+                Right () -> mapM_ E.throwIO held
+                Left e -> awaiting finished (held <|> Just e)
 
 watchdog :: WatchdogFor a => Watchdog a -> IO () -> TVar Bool -> IO ()
 watchdog wd lastResort done = do
     Recorded n curr <- readTVarIO $ wdRecorded wd
-    action <- decide Nothing curr
+    action <- deciding Nothing curr
     loop n curr action Nothing Nothing Nothing
   where
+    -- A 'decide' or a probe which fails times the task out, rather than
+    -- ending the supervision unseen.
+    deciding mprev curr = decide mprev curr `E.catch` failed TimedOut
+    failed :: x -> E.SomeException -> IO x
+    failed x e = case E.fromException e of
+        Just (E.SomeAsyncException _) -> E.throwIO e
+        Nothing -> return x
+
     -- Applying what 'decide' answered, then waiting for what happens next.
     loop _ _ Abort _ _ _ = handOver wd
     loop n prev action budget0 deadline0 probe0 = do
@@ -295,8 +322,10 @@ watchdog wd lastResort done = do
             Stop -> return ()
             Expired
                 | Just (_, run) <- probe -> do
-                    run
-                    wait n prev budget deadline Nothing
+                    ok <- (True <$ run) `E.catch` failed False
+                    if ok
+                        then wait n prev budget deadline Nothing
+                        else loop n prev TimedOut budget deadline Nothing
             Changed -> do
                 -- However busy the task is, look at it once per
                 -- interval at most: recording costs a write to a 'TVar'
@@ -308,7 +337,7 @@ watchdog wd lastResort done = do
                     Stop -> return ()
                     _ -> do
                         Recorded n' curr <- readTVarIO $ wdRecorded wd
-                        action' <- decide (Just prev) curr
+                        action' <- deciding (Just prev) curr
                         loop n' curr action' budget deadline probe
             Expired -> do
                 atomically $ writeTVar (wdTimedOut wd) True
@@ -325,11 +354,15 @@ watchdog wd lastResort done = do
         return $ case action of
             Ignore -> (budget, deadline, probe)
             Unlimited -> (budget, Nothing, Nothing)
-            SetTimeout us -> (Just us, Just $ now + us * 1000, Nothing)
+            SetTimeout us -> (Just us, Just $ now + ns us, Nothing)
             SetTimeoutProbing us run ->
-                (Just us, Just $ now + us * 1000, Just (now + us * 500, run))
+                (Just us, Just $ now + ns us, Just (now + ns us `div` 2, run))
             TimedOut -> (budget, Just now, Nothing)
             Abort -> (budget, deadline, probe)
+
+    -- Microseconds in nanoseconds, kept from wrapping around.
+    ns :: Word64 -> Word64
+    ns us = min us (maxBound `div` 4000) * 1000
 
     -- A quarter of what is being waited out, capped at one second, and
     -- one second when nothing is.  In microseconds.
