@@ -1,4 +1,3 @@
-{-# LANGUAGE CPP #-}
 {-# LANGUAGE NumericUnderscores #-}
 {-# LANGUAGE OverloadedStrings #-}
 
@@ -69,19 +68,16 @@ runServerUntil accept' end = do
 
 -- Put one connection on the listening socket's queue and drop it.
 --
--- On POSIX the accept loop waits for the socket to have something to accept
--- before it calls 'settingsAccept', so an accept action that fails without
+-- The accept loop waits for the socket to have something to accept before
+-- it calls 'settingsAccept', so an accept action that fails without
 -- touching the socket -- which is how these tests make accept() fail -- is
--- never reached on a socket nobody has connected to.  Windows has no
--- readiness to wait for and calls accept straight away.
+-- never reached on a socket nobody has connected to.  This holds on
+-- Windows too since network 4, which waits for readiness under WinIO; with
+-- network 3.2 the connection is simply never accepted.
 nudge :: Socket -> IO ()
-#if WINDOWS
-nudge _ = return ()
-#else
 nudge listenSock = do
     sa <- getSocketName listenSock
     bracket (socket AF_INET Stream defaultProtocol) close $ \s -> connect s sa
-#endif
 
 spec :: Spec
 spec = do

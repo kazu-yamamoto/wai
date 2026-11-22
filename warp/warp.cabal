@@ -299,6 +299,9 @@ test-suite spec
     if impl(ghc >=8)
         default-extensions: Strict StrictData
 
+    if os(windows) && (impl(ghc >= 9.12.5 && < 9.14) || impl(ghc >= 9.14.2))
+        ghc-options: -with-rtsopts=--io-manager=native
+
 benchmark parser
     type:             exitcode-stdio-1.0
     main-is:          Parser.hs
