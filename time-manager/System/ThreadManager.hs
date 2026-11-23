@@ -42,6 +42,8 @@ module System.ThreadManager (
     -- * Results
     Managed,
     forkManagedWithResult,
+    StoppedByThreadManager (..),
+    ManagedThreadKilled (..),
     managedThreadId,
     waitManagedSTM,
     pollManagedSTM,
@@ -65,7 +67,7 @@ import Control.Exception (
     SomeException (..),
  )
 import qualified Control.Exception as E
-import Control.Monad (unless, void, when)
+import Control.Monad (unless, void, when, (<=<))
 import Data.Foldable (forM_)
 import Data.IORef (IORef, atomicModifyIORef', newIORef, readIORef)
 import Data.Map.Strict (Map)
@@ -463,27 +465,56 @@ data Managed a = Managed ThreadId (TMVar (Either SomeException a))
 -- | Fork a managed thread whose end is kept for 'waitManagedSTM'.
 --
 --   Nothing it ends with is thrown on, so nothing is printed: what to do
---   with it is the waiter's.  Being killed by the manager is an end like
---   any other, and a thread the stopped manager does not run at all ends
---   with 'KilledByThreadManager' too, so a waiter never waits for ever.
+--   with it is the waiter's.  The waiter is handed synchronous exceptions
+--   only, since it is not the one killed: 'StoppedByThreadManager' once the
+--   manager killed the thread or did not run it, so a waiter never waits
+--   for ever, and 'ManagedThreadKilled' for any other asynchronous one.
 --
 -- @since 0.5.3
 forkManagedWithResult :: ThreadManager -> String -> IO a -> IO (Managed a)
 forkManagedWithResult mgr label io = do
     var <- newEmptyTMVarIO
     let put = atomically . void . tryPutTMVar var
+        stopped = put $ Left $ E.toException StoppedByThreadManager
     -- Masked but for the action, so that a kill cannot land between the
     -- action's end and its being kept.  The action runs in the caller's
     -- masking state, as async's does.
     tid <-
         E.mask $ \restore ->
-            forkManagedByFinally
-                mgr
-                (\body -> forkIO $ body restore)
-                label
-                (\restore' -> E.try (restore' io) >>= put)
-                (put $ Left $ E.toException $ KilledByThreadManager Nothing)
+            E.bracketOnError (reserveManaged mgr) (release mgr) $ \rsv ->
+                forkIO $ managed mgr rsv label stopped $ \(_, ManagedThread _ ref) ->
+                    E.try (restore io) >>= either (put . Left <=< forWaiter ref) (put . Right)
     return $ Managed tid var
+  where
+    -- The kill of its manager's, or someone else's asynchronous exception,
+    -- as what its waiter is handed.
+    forWaiter ref e = case E.fromException e of
+        Just (E.SomeAsyncException _) -> do
+            k <- readIORef ref
+            return $ case (E.fromException e, k) of
+                (Just (KilledByThreadManager _), Killing _) -> E.toException StoppedByThreadManager
+                _ -> E.toException $ ManagedThreadKilled e
+        Nothing -> return e
+
+-- | What a thread of 'forkManagedWithResult' ended with for its waiter when
+--   its manager killed it or did not run it.  Synchronous: the waiter was
+--   not killed.
+--
+-- @since 0.5.3
+data StoppedByThreadManager = StoppedByThreadManager
+    deriving (Show)
+
+instance Exception StoppedByThreadManager
+
+-- | What a thread of 'forkManagedWithResult' ended with for its waiter when
+--   an asynchronous exception of someone else's ended it.  Synchronous: the
+--   waiter was not killed.
+--
+-- @since 0.5.3
+newtype ManagedThreadKilled = ManagedThreadKilled SomeException
+    deriving (Show)
+
+instance Exception ManagedThreadKilled
 
 -- | The thread of 'forkManagedWithResult', as for a last resort of the
 --   caller's own.

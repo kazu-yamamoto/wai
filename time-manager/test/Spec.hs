@@ -48,7 +48,6 @@ import GHC.Conc.Sync (
     setUncaughtExceptionHandler,
  )
 import System.ThreadManager (
-    KilledByThreadManager,
     ThreadManager,
     countManaged,
     forkManaged,
@@ -57,6 +56,8 @@ import System.ThreadManager (
     forkManagedTimeoutFinally,
     forkManagedUnmaskFinally,
     forkManagedWithResult,
+    ManagedThreadKilled (..),
+    StoppedByThreadManager (..),
     managedThreadId,
     newThreadManager,
     pollManagedSTM,
@@ -65,6 +66,7 @@ import System.ThreadManager (
     stopAfterWithGrace,
     takeReservation,
     withThreadManager,
+    waitManaged,
     waitManagedSTM,
     waitStoppingSTM,
     waitUntilAllGone,
@@ -170,8 +172,32 @@ main = hspec $ do
             m <- withThreadManager 1_000_000 $ \tm -> forkManagedWithResult tm "probe" $ threadDelay 10_000_000
             -- Killed and waited for by then.
             r <- atomically $ pollManagedSTM m
-            fmap (either (isJust . (E.fromException :: E.SomeException -> Maybe KilledByThreadManager)) (const False)) r
+            fmap (either (isJust . (E.fromException :: E.SomeException -> Maybe StoppedByThreadManager)) (const False)) r
                 `shouldBe` Just True
+
+        it "hands its waiter someone else's kill as a synchronous exception" $ do
+            tm <- newThreadManager
+            m <- forkManagedWithResult tm "probe" $ threadDelay 10_000_000
+            threadDelay 50_000
+            killThread $ managedThreadId m
+            r <- E.try $ waitManaged m
+            case r of
+                Left e
+                    | Just (ManagedThreadKilled k) <- E.fromException e ->
+                        E.fromException k `shouldBe` Just E.ThreadKilled
+                _ -> expectationFailure "not handed as ManagedThreadKilled"
+            waitUntilAllGoneFor tm 1_000_000 `shouldReturn` True
+
+        -- The waiter was not killed, so it is not handed the kill as one.
+        it "does not hand its waiter the kill of the manager's" $ do
+            tm <- newThreadManager
+            m <- forkManagedWithResult tm "probe" $ threadDelay 10_000_000
+            threadDelay 50_000
+            stopAfter tm (return ()) $ \_ -> return ()
+            r <- E.try $ waitManaged m
+            case r of
+                Left e -> isAsyncException' e `shouldBe` False
+                Right () -> expectationFailure "returned"
 
         it "runs the thread in the caller's masking state" $ do
             tm <- newThreadManager
@@ -203,7 +229,7 @@ main = hspec $ do
             threadDelay 50_000
             stopAfter tm (return ()) $ \_ -> return ()
             r <- Timeout.timeout 1_000_000 $ atomically $ waitManagedSTM m
-            fmap (either (isJust . (E.fromException :: E.SomeException -> Maybe KilledByThreadManager)) (const False)) r
+            fmap (either (isJust . (E.fromException :: E.SomeException -> Maybe StoppedByThreadManager)) (const False)) r
                 `shouldBe` Just True
 
         it "ends a thread the stopped manager does not run" $ do
@@ -211,7 +237,7 @@ main = hspec $ do
             stopAfter tm (return ()) $ \_ -> return ()
             m <- forkManagedWithResult tm "probe" $ return ()
             r <- Timeout.timeout 1_000_000 $ atomically $ waitManagedSTM m
-            fmap (either (isJust . (E.fromException :: E.SomeException -> Maybe KilledByThreadManager)) (const False)) r
+            fmap (either (isJust . (E.fromException :: E.SomeException -> Maybe StoppedByThreadManager)) (const False)) r
                 `shouldBe` Just True
 
     describe "ThreadManager, stopped with a grace" $ do
@@ -324,7 +350,7 @@ main = hspec $ do
             t1 <- getMonotonicTimeNSec
             (t1 - t0) `shouldSatisfy` (< 500_000_000)
             r <- atomically $ waitManagedSTM m
-            either (isJust . (E.fromException :: E.SomeException -> Maybe KilledByThreadManager)) (const False) r
+            either (isJust . (E.fromException :: E.SomeException -> Maybe StoppedByThreadManager)) (const False) r
                 `shouldBe` True
             putMVar release ()
 
@@ -723,6 +749,9 @@ probing answers = do
     r <- withWatchdog wd (return ()) $
         Timeout.timeout 1_000_000 $ atomically $ timedOutSTM wd
     (,) r <$> readIORef probes
+
+isAsyncException' :: E.SomeException -> Bool
+isAsyncException' e = isJust (E.fromException e :: Maybe E.SomeAsyncException)
 
 forever' :: IO () -> IO ()
 forever' io = io >> forever' io
