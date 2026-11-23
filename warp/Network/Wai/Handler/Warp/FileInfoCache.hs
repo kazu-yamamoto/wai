@@ -1,5 +1,6 @@
 {-# LANGUAGE CPP #-}
 {-# LANGUAGE RecordWildCards #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 
 module Network.Wai.Handler.Warp.FileInfoCache (
     FileInfo (..),
@@ -7,7 +8,7 @@ module Network.Wai.Handler.Warp.FileInfoCache (
     getInfo, -- test purpose only
 ) where
 
-import Control.Exception (bracket, onException, throwIO)
+import Control.Exception (IOException, bracket, catch, throwIO)
 import Control.Reaper
 import Network.HTTP.Date
 #if WINDOWS
@@ -72,8 +73,10 @@ getAndRegisterInfo reaper path = do
         Just Negative -> throwIO (userError "FileInfoCache:getAndRegisterInfo")
         Just (Positive x) -> return x
         Nothing ->
+            -- Only a file which is not there is cached as such: an
+            -- asynchronous exception is not replaced with a 404.
             positive reaper path
-                `onException` negative reaper path
+                `catch` \(_ :: IOException) -> negative reaper path
 
 positive :: FileInfoCache -> FilePath -> IO FileInfo
 positive reaper path = do

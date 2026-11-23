@@ -157,6 +157,8 @@ http1server settings ii conn cc transport app addr th istatus src =
                 idxhdr
                 nextBodyFlush
                 `catch` \e -> do
+                    -- A kill or a give-up is not the request's to report.
+                    when (isAsyncException e) $ throwIO e
                     settingsOnException settings (Just req) e
                     -- Don't throw the error again to prevent calling settingsOnException twice.
                     return CloseConnection

@@ -12,6 +12,7 @@ import Control.Exception (bracket)
 import Control.Monad (void)
 import qualified Data.ByteString as S
 import Data.IORef
+import Data.Maybe (isJust)
 import Network.HTTP.Client
 import Network.HTTP.Types (ok200, status200)
 import Network.Socket
@@ -71,6 +72,33 @@ spec = describe "graceful shutdown" $ do
                 stopAccepting
                 timeout 5_000_000 (wait server) `shouldReturn` Just ()
                 timeout 1_000_000 (byManager <$> takeMVar killed) `shouldReturn` Just True
+                close client
+
+    -- Reported once, as the connection's end rather than the request's,
+    -- and not taken for a request which failed and was closed.
+    it "does not report its kill as the request's exception" $ do
+        servingNow <- newEmptyMVar
+        stopSlot <- newEmptyMVar
+        reported <- newIORef []
+        let settings =
+                setInstallShutdownHandler (putMVar stopSlot) $
+                    setGracefulShutdownTimeout (Just 1) $
+                        setOnException
+                            (\mreq e -> atomicModifyIORef' reported $ \es -> ((isJust mreq, byManager e) : es, ()))
+                            defaultSettings
+            app _ respond = do
+                putMVar servingNow ()
+                threadDelay 10_000_000
+                respond $ responseLBS status200 [] ""
+        bracket openFreePort (close . snd) $ \(testPort, sock) ->
+            withAsync (runSettingsSocket settings sock app) $ \server -> do
+                stopAccepting <- takeMVar stopSlot
+                client <- openConnection testPort
+                sendAll client "GET / HTTP/1.1\r\nHost: localhost\r\n\r\n"
+                timeout 2_000_000 (takeMVar servingNow) `shouldReturn` Just ()
+                stopAccepting
+                timeout 5_000_000 (wait server) `shouldReturn` Just ()
+                readIORef reported `shouldReturn` [(False, True)]
                 close client
 
     it "waits for a connection accepted just before it stopped accepting" $ do
