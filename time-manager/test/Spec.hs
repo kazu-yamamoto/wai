@@ -81,6 +81,7 @@ import System.Watchdog (
     withWatchdog,
  )
 import qualified System.Timeout as Timeout
+import qualified System.Watchdog as W
 import Test.HUnit (assertBool)
 
 main :: IO ()
@@ -100,6 +101,14 @@ main = hspec $ do
             (r, probes) <- probing False
             r `shouldBe` Just ()
             probes `shouldBe` 1
+    describe "Watchdog, busy" $
+        it "times out a task whose changes do not count, however many" $ do
+            wd <- newWatchdog Busy
+            busy <- forkIO $ forever' $ update id wd
+            r <-
+                withWatchdog wd (return ()) (Timeout.timeout 2_000_000 $ atomically $ timedOutSTM wd)
+                    `finally` killThread busy
+            r `shouldBe` Just ()
     describe "ThreadManager, once stopped" $ do
         -- 'setup' refuses to record a thread forked before the stop and
         -- scheduled after it.  That must not escape the fork, and must not
@@ -684,6 +693,13 @@ oldResume Handle{..} = do
 
 ----------------------------------------------------------------
 
+data Busy
+
+instance WatchdogFor Busy where
+    data ContextFor Busy = Busy
+    decide Nothing _ = return $ W.setTimeout 200_000
+    decide (Just _) _ = return W.ignore
+
 data Probed
 
 instance WatchdogFor Probed where
@@ -707,5 +723,6 @@ probing answers = do
     r <- withWatchdog wd (return ()) $
         Timeout.timeout 1_000_000 $ atomically $ timedOutSTM wd
     (,) r <$> readIORef probes
-  where
-    forever' io = io >> forever' io
+
+forever' :: IO () -> IO ()
+forever' io = io >> forever' io

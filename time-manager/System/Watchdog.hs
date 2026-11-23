@@ -319,6 +319,8 @@ watchdog wd lastResort done = do
 
     -- Applying what 'decide' answered, then waiting for what happens next.
     loop _ _ Abort _ _ _ = handOver wd
+    -- Not waited for: a change winning that wait would put it off.
+    loop _ _ TimedOut budget _ _ = expire budget
     loop n prev action budget0 deadline0 probe0 = do
         (budget, deadline, probe) <- apply action budget0 deadline0 probe0
         wait n prev budget deadline probe
@@ -329,12 +331,7 @@ watchdog wd lastResort done = do
         ev <- waitFor (Just n) =<< remaining (maybe deadline (Just . fst) probe)
         case ev of
             Stop -> return ()
-            Expired
-                | Just (_, run) <- probe -> do
-                    ok <- (True <$ run) `E.catch` failed False
-                    if ok
-                        then wait n prev budget deadline Nothing
-                        else loop n prev TimedOut budget deadline Nothing
+            Expired -> fire n prev budget deadline probe
             Changed -> do
                 -- However busy the task is, look at it once per
                 -- interval at most: recording costs a write to a 'TVar'
@@ -347,17 +344,34 @@ watchdog wd lastResort done = do
                     _ -> do
                         Recorded n' curr <- readTVarIO $ wdRecorded wd
                         action' <- deciding (Just prev) curr
-                        loop n' curr action' budget deadline probe
-            Expired -> do
-                atomically $ writeTVar (wdTimedOut wd) True
-                -- The same interval is how long the task is given
-                -- to finish by itself before it is given up on, whatever it
-                -- does meanwhile: a tenth of a second at least, or a zero
-                -- or tiny timeout would leave it next to none.
-                quiet <- waitFor Nothing $ Just $ max 100_000 $ interval budget
-                case quiet of
-                    Stop -> return ()
-                    _ -> lastResort
+                        -- A change which does not count, once the time
+                        -- has come, is no reason to wait again.
+                        late <- passed $ maybe deadline (Just . fst) probe
+                        case action' of
+                            Ignore | late -> fire n' curr budget deadline probe
+                            _ -> loop n' curr action' budget deadline probe
+
+    -- The time has come: the probe's if one is due, or the deadline's.
+    fire n prev budget deadline (Just (_, run)) = do
+        ok <- (True <$ run) `E.catch` failed False
+        if ok
+            then wait n prev budget deadline Nothing
+            else expire budget
+    fire _ _ budget _ Nothing = expire budget
+
+    expire budget = do
+        atomically $ writeTVar (wdTimedOut wd) True
+        -- The same interval is how long the task is given
+        -- to finish by itself before it is given up on, whatever it
+        -- does meanwhile: a tenth of a second at least, or a zero
+        -- or tiny timeout would leave it next to none.
+        quiet <- waitFor Nothing $ Just $ max 100_000 $ interval budget
+        case quiet of
+            Stop -> return ()
+            _ -> lastResort
+
+    passed Nothing = return False
+    passed (Just d) = (>= d) <$> getNow
 
     apply action budget deadline probe = do
         now <- getNow
