@@ -41,7 +41,9 @@ import Network.Socket (
     fdSocket,
 #endif
     getSocketName,
+    getSocketOption,
     isClosedSocketError,
+    isSupportedSocketOption,
     isTransientAcceptError,
     unsafeClose,
     acceptWith,
@@ -306,6 +308,11 @@ instance E.Exception AcceptStopped
 
 makeListener :: Settings -> Socket -> IO Listener
 makeListener set socket = do
+    listening <- isListening
+    unless listening $
+        E.throwIO $
+            -- Not 'InvalidArgument', which network takes for a closed socket.
+            IOError Nothing IllegalOperation "Warp" "the socket is not listening" Nothing Nothing
     stopping <- newTVarIO False
     settingsInstallShutdownHandler set $ atomically $ writeTVar stopping True
     return
@@ -316,6 +323,13 @@ makeListener set socket = do
             , closeListener = unsafeClose socket
             }
   where
+    -- Where network can tell: not on macOS.  A closed socket is left to
+    -- the accept loop, which ends quietly on it.
+    isListening
+        | isSupportedSocketOption AcceptConn =
+            ((/= 0) <$> getSocketOption socket AcceptConn) `E.catch` \e ->
+                if isClosedSocketError e then return True else E.throwIO e
+        | otherwise = return True
     told stopping = check =<< readTVar stopping
     -- Closing the listening socket is how a server was stopped before there
     -- was anything to tell, and callers that do it are still out there. It
@@ -337,8 +351,9 @@ makeListener set socket = do
 -- Note that the 'settingsPort' will still be passed to 'Application's via the
 -- 'serverPort' record.
 --
--- The socket has to be listening: one which is not ends the server quietly
--- on Linux and is waited on for good on macOS.
+-- The socket has to be listening.  One which is not is refused with an
+-- 'IOError' where network can tell, which is everywhere but macOS; there,
+-- it is waited on for good.
 runSettingsSocket :: Settings -> Socket -> Application -> IO ()
 runSettingsSocket oldSettings socket app = do
     listener <- makeListener oldSettings socket

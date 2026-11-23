@@ -14,7 +14,7 @@ import Foreign.C.Error (
     eOPNOTSUPP,
     errnoToIOError,
  )
-import GHC.IO.Exception (IOException (..))
+import GHC.IO.Exception (IOErrorType (..), IOException (..))
 import HTTP (responseBody, sendGET)
 import Network.HTTP.Types (status200)
 import Network.Socket
@@ -91,6 +91,17 @@ openListenSocket = do
 
 spec :: Spec
 spec = do
+    describe "a socket which is not listening" $
+        it "is refused where network can tell" $
+            if not (isSupportedSocketOption AcceptConn)
+                then pendingWith "network cannot tell a listening socket here"
+                else bracket (socket AF_INET Stream defaultProtocol) close $ \sock -> do
+                    bind sock $ SockAddrInet 0 $ tupleToHostAddress (127, 0, 0, 1)
+                    r <- timeout 5_000_000 $ try $ runSettingsSocket defaultSettings sock $ \_ respond -> respond (responseLBS status200 [] "ok")
+                    case r of
+                        Just (Left e) -> ioe_type e `shouldBe` IllegalOperation
+                        _ -> expectationFailure "the server was not refused"
+
     describe "a listener that goes away" $ do
         it "ends the accept loop quietly when the socket is closed on purpose" $ do
             r <- runServerUntil $ \_ closeListenSocket -> closeListenSocket
