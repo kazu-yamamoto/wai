@@ -90,7 +90,7 @@ socketConnection set cc s = (`E.onException` close s) $ do
     mysa <- getSocketName s
     return
         Connection
-            { connSendMany = Sock.sendMany s
+            { connSendMany = sendmany
             , connSendAll = sendall
             , connSendFile = sendfile writeBufferRef
 #if MIN_VERSION_network(3,1,1)
@@ -139,7 +139,9 @@ socketConnection set cc s = (`E.onException` close s) $ do
 
     -- A send gives up on 'connSendGiveUp' rather than waiting for the
     -- last resort, which does not reach a send on Windows.
-    sendall bs = do
+    sendall bs = giving $ Sock.sendAllWith s bs
+    sendmany bss = giving $ Sock.sendManyWith s bss
+    giving send = do
         giveUp <- readTVarIO $ connSendGiveUp cc
         E.handleJust
             ( \e ->
@@ -148,7 +150,7 @@ socketConnection set cc s = (`E.onException` close s) $ do
                     else Nothing
             )
             E.throwIO
-            (Sock.sendAllWith s bs giveUp)
+            (send giveUp)
             >>= either (\_ -> E.throwIO T.TimeoutThread) return
 
 -- | The state warp keeps for one connection.  It is made before the
