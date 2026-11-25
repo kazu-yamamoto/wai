@@ -42,11 +42,11 @@ extra-deps:
   - git: https://github.com/kazu-yamamoto/http-semantics
     commit: ee8038f7b4603f633f271b26b58328ae9382caa3
   - git: https://github.com/kazu-yamamoto/http2
-    commit: 760dae5bc803208079d36ff6fa4117d5c6dcd1e1
+    commit: 5deaba332750943d2c03df06addabe13259e87c3
   - git: https://github.com/kazu-yamamoto/quic
-    commit: a6a5fa1600b8aea48095f4043e31ab03127f9ad5
+    commit: bea99beba74682b1612363886ee6fcde610dcff9
   - git: https://github.com/kazu-yamamoto/http3
-    commit: f68c895c53141bbae1a78d67716fed41d8ef4127
+    commit: 2f057c3795f37fe5ee04677c57d85e0efcc50361
   - mlkem-0.2.2.0
   - network-3.2.16.0
   - network-control-0.2.0
