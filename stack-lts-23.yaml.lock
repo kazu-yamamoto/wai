@@ -5,12 +5,12 @@
 
 packages:
 - completed:
-    hackage: tls-2.6.0@sha256:fc3bc85c1413fc31a953ccf0531b323620cdbd35378037470ddf7744e7252ca8,6730
+    hackage: tls-2.6.4@sha256:5d33623417b5cfbfe810bc2939e12bcd84320baae013624062b14bd71383c24b,6749
     pantry-tree:
-      sha256: 081d3f0f70f35800844bb53a90b07aa6df8bcf54a654cc6c6bad4af757bf06cd
-      size: 7253
+      sha256: 83566888c96bfde0b0689d182b1329d17fd45361f0297469b7e66e0e7176250b
+      size: 7314
   original:
-    hackage: tls-2.6.0
+    hackage: tls-2.6.4
 - completed:
     hackage: crypto-token-0.2.1@sha256:f909da34713f94b251a29c6588f0a47e81d576f255ad1b47000924aef4169a2f,1326
     pantry-tree:
@@ -114,37 +114,37 @@ packages:
     commit: ee8038f7b4603f633f271b26b58328ae9382caa3
     git: https://github.com/kazu-yamamoto/http-semantics
 - completed:
-    commit: ae94d4122691bda919d735990ab1ee5d45bde52f
+    commit: 760dae5bc803208079d36ff6fa4117d5c6dcd1e1
     git: https://github.com/kazu-yamamoto/http2
     name: http2
     pantry-tree:
-      sha256: 00df4746d59476f1c36519df776502e5c4f606302e63607a5be036edf05ae2c9
-      size: 52639
+      sha256: 0405829c9467e9a7f004acff0195e252e004f4a17b055d87a3121db55ba448cf
+      size: 52640
     version: 5.4.14
   original:
-    commit: ae94d4122691bda919d735990ab1ee5d45bde52f
+    commit: 760dae5bc803208079d36ff6fa4117d5c6dcd1e1
     git: https://github.com/kazu-yamamoto/http2
 - completed:
-    commit: 9528eac2f9a4e79f201af562f9a5d5d8f38f8475
+    commit: a6a5fa1600b8aea48095f4043e31ab03127f9ad5
     git: https://github.com/kazu-yamamoto/quic
     name: quic
     pantry-tree:
-      sha256: 614e32ce689afa8bdac26fbfcbae51f175e4fc7aee49e2341e200205ca804719
-      size: 8715
+      sha256: 01d4a7f41564a84e603ca99a68d7bcb0214ef0819504888d74e4b5d4acee72c5
+      size: 8717
     version: 0.3.24
   original:
-    commit: 9528eac2f9a4e79f201af562f9a5d5d8f38f8475
+    commit: a6a5fa1600b8aea48095f4043e31ab03127f9ad5
     git: https://github.com/kazu-yamamoto/quic
 - completed:
-    commit: 401d35b4137caee8e7077cbd9e3269f743da4774
+    commit: f68c895c53141bbae1a78d67716fed41d8ef4127
     git: https://github.com/kazu-yamamoto/http3
     name: http3
     pantry-tree:
-      sha256: 741c9b2fecf55d7b9984e5e7d0faf98664d7d2f735049f9449b256004541637e
-      size: 53637
+      sha256: 4d6f99e9c622d2387f9dfafb4366566f43139836e811167a2bd2254afdb0ec76
+      size: 53638
     version: 0.1.12
   original:
-    commit: 401d35b4137caee8e7077cbd9e3269f743da4774
+    commit: f68c895c53141bbae1a78d67716fed41d8ef4127
     git: https://github.com/kazu-yamamoto/http3
 - completed:
     hackage: mlkem-0.2.2.0@sha256:c16cb61190e915593767e716dd08957607f6045a01d7c3a1313fbd74eb31c75d,4759
@@ -154,12 +154,12 @@ packages:
   original:
     hackage: mlkem-0.2.2.0
 - completed:
-    hackage: network-3.2.14.0@sha256:74a73ecad6c0a22b39bebc05723987def2beebbde7857b642ebd3e156c56b427,5532
+    hackage: network-3.2.16.0@sha256:5e9b1f157014b90603dce772c9213114226886322f4a061423daa53cabb1eff3,5532
     pantry-tree:
-      sha256: 90db0620b73f3176ec47687f7c4454fdb7db16b8eb403b4488e57b6b8ea3424c
+      sha256: 3702508b547b2421d969e3cd11e8af6905f2b6d0889dcdcdcb171c0a15eae778
       size: 4382
   original:
-    hackage: network-3.2.14.0
+    hackage: network-3.2.16.0
 - completed:
     hackage: network-control-0.2.0@sha256:481caffe61a45a5e75b339befc0f14937f01dab5fda8588e870a3c65adec751e,1255
     pantry-tree:

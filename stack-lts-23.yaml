@@ -23,7 +23,7 @@ nix:
     - fcgi
     - zlib
 extra-deps:
-  - tls-2.6.2
+  - tls-2.6.4
   - crypto-token-0.2.1
   - crypton-asn1-encoding-0.10.0
   - crypton-asn1-parse-0.10.0

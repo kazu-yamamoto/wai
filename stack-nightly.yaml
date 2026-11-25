@@ -23,7 +23,7 @@ nix:
     - fcgi
     - zlib
 extra-deps:
-  - tls-2.6.2
+  - tls-2.6.4
   - tls-session-manager-0.1.2@rev:1
   - hpke-0.4.0
   - ech-config-0.0.2

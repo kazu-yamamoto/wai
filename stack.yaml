@@ -23,7 +23,7 @@ nix:
     - fcgi
     - zlib
 extra-deps:
-  - tls-2.6.2
+  - tls-2.6.4
   - ech-config-0.0.2
   - crypto-token-0.2.1
   - fast-logger-3.2.8
