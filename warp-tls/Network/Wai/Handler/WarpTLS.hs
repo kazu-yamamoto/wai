@@ -94,7 +94,9 @@ import Network.Socket (
 #if MIN_VERSION_warp(3,4,21)
 import Network.Socket (unsafeGracefulClose)
 #endif
+#if !MIN_VERSION_warp(3,5,0) || !MIN_VERSION_tls(2,6,4)
 import Network.Socket.BufferPool
+#endif
 import Network.Socket.ByteString (recvWith, sendAllWith)
 #if !MIN_VERSION_warp(3,5,0)
 import Network.Socket.ByteString (sendAll)
@@ -476,6 +478,162 @@ httpOverTls
     -> S.ByteString
     -> params
     -> IO (Connection, Transport)
+#if MIN_VERSION_warp(3,5,0) && MIN_VERSION_tls(2,6,4)
+-- tls gives up its handshake, receives, sends and close_notify on what
+-- warp's own reads and writes give up on, taken as 'STM' actions.
+httpOverTls TLSSettings{..} set cc s bs0 params =
+    makeConn `onException` unsafeClose s
+  where
+    makeConn = do
+        (ss, _) <- makeServerState set
+        leftover <- I.newIORef bs0
+        -- Whether ALPN chose HTTP/2, for how long a close waits for FIN.
+        h2 <- I.newIORef False
+        let withBackend =
+                WithBackend
+                    (backend h2 leftover)
+                    (TLS.RecvWith $ recvNWith leftover)
+                    (TLS.SendWith sendWith')
+        ctx <- TLS.contextNew withBackend params
+        TLS.contextHookSetLogging ctx tlsLogging
+        -- Given up on by the watchdog or the shutdown: a quiet end, as a
+        -- first read ended by them is.
+        let shuttingDown = currentShuttingDownStateSTM ss >>= check
+        TLS.handshakeWith ctx (timedOutSTM (connWatchdog cc) <|> shuttingDown)
+            >>= either (\_ -> throwIO TimeoutThread) return
+        TLS.getNegotiatedProtocol ctx >>= I.writeIORef h2 . (== Just "h2")
+        mysa <- getSocketName s
+        attachConnGivingUp ss cc mysa ctx
+    backend h2 leftover =
+        TLS.Backend
+            { TLS.backendFlush = return ()
+            , TLS.backendClose = do
+                -- As a plain connection waits for a peer's FIN: by the
+                -- protocol, and not at all for 0.
+                isH2 <- I.readIORef h2
+                let tm
+                        | isH2 = settingsGracefulCloseTimeout2 set
+                        | otherwise = settingsGracefulCloseTimeout1 set
+                if tm <= 0
+                    then closer s
+                    else gracefulCloser s tm `E.catch` throughAsync (return ())
+            , TLS.backendSend = \bs -> void $ sendWith' bs (retry :: STM ())
+            , TLS.backendRecv = \n -> either (const S.empty) id <$> recvNWith leftover n (retry :: STM ())
+            }
+    gracefulCloser
+        | settingsUnsafeClose set = unsafeGracefulClose
+        | otherwise = gracefulClose
+    closer
+        | settingsUnsafeClose set = unsafeClose
+        | otherwise = close
+    -- The bytes asked for, the first of them those warp read to tell TLS
+    -- from plain HTTP.  What arrived before a give-up is answered, and a
+    -- reset or EOF ends it short.
+    recvNWith :: I.IORef S.ByteString -> Int -> STM g -> IO (Either g S.ByteString)
+    recvNWith leftover n giveUp = do
+        buf <- I.atomicModifyIORef' leftover $ \b -> let (h, t) = S.splitAt n b in (t, h)
+        loop (S.length buf) [buf]
+      where
+        loop have acc
+            | have >= n = done acc
+            | otherwise = do
+                r <- resetIsEOF $ recvWith s (n - have) giveUp
+                case r of
+                    Left g
+                        | have == 0 -> return $ Left g
+                        | otherwise -> done acc
+                    Right bs
+                        | S.null bs -> done acc
+                        | otherwise -> loop (have + S.length bs) (bs : acc)
+        done = return . Right . S.concat . reverse
+    resetIsEOF =
+        E.handleJust
+            (\e -> if ioeGetErrorType e == ResourceVanished then Just () else Nothing)
+            (\_ -> return $ Right S.empty)
+    sendWith' :: S.ByteString -> STM g -> IO (Either g ())
+    sendWith' bs giveUp =
+        E.handleJust
+            ( \e ->
+                if ioeGetErrorType e == ResourceVanished
+                    then Just ConnectionClosedByPeer
+                    else Nothing
+            )
+            throwIO
+            (sendAllWith s bs giveUp)
+
+-- | A 'TLS.Backend' with a receive and a send which can be given up on.
+data WithBackend = WithBackend TLS.Backend TLS.RecvWith TLS.SendWith
+
+instance TLS.HasBackend WithBackend where
+    initializeBackend _ = return ()
+    getBackend (WithBackend b _ _) = b
+    getBackendRecvWith (WithBackend _ r _) = Just r
+    getBackendSendWith (WithBackend _ _ w) = Just w
+
+-- | 'attachConn' whose receives, sends and close_notify give up as warp's
+--   plain ones do: receives on 'watchedGiveUp', sends and close_notify on
+--   'connSendGiveUp'.
+attachConnGivingUp
+    :: ServerState -> ConnContext -> SockAddr -> TLS.Context -> IO (Connection, Transport)
+attachConnGivingUp ss cc mysa ctx = do
+    h2 <- (== Just "h2") <$> TLS.getNegotiatedProtocol ctx
+    isH2 <- I.newIORef h2
+    writeBuffer <- createWriteBuffer 16384
+    writeBufferRef <- I.newIORef writeBuffer
+    tls <- getTLSinfo ctx
+    return (conn writeBufferRef isH2, tls)
+  where
+    conn writeBufferRef isH2 =
+        Connection
+            { connSendMany = sendData . L.fromChunks
+            , connSendAll = sendall
+            , connSendFile = sendfile
+            , connClose = close'
+            , connRecv = recv
+            , connRecvBuf = \_ _ -> return True -- obsoleted
+            , connWriteBuffer = writeBufferRef
+            , connHTTP2 = isH2
+            , connMySockAddr = mysa
+            }
+      where
+        sendall = sendData . L.fromChunks . return
+        sendData lbs = afterCloseNotify $ do
+            giveUp <- readTVarIO $ connSendGiveUp cc
+            TLS.sendDataWith ctx lbs giveUp >>= either (\_ -> throwIO TimeoutThread) return
+        -- tls answers the peer's close_notify with its own, so a send after
+        -- it has nowhere to go: dropped, as the GOAWAY which ends an HTTP/2
+        -- connection the peer has closed.
+        afterCloseNotify = handle $ \e -> case E.fromException e of
+            Just (TLS.PostHandshake TLS.Error_EOF) -> return ()
+            _ -> throwIO (e :: SomeException)
+        -- Given up on by the shutdown: the end of input to warp, while tls
+        -- can still send close_notify.
+        recv = handle onEOF $ do
+            giveUp <- watchedGiveUp ss cc
+            r <- TLS.recvDataWith ctx giveUp
+            case r of
+                Left ShuttingDown -> return S.empty
+                Left TimedOut -> throwIO TimeoutThread
+                Right bs -> return bs
+          where
+            onEOF e
+                | Just (TLS.PostHandshake TLS.Error_EOF) <- E.fromException e = return S.empty
+                | Just ioe <- fromException e, isEOFError ioe = return S.empty
+                | otherwise = throwIO e
+        sendfile fid offset len hook headers = do
+            writeBuffer <- I.readIORef writeBufferRef
+            readSendFile writeBuffer sendall fid offset len hook headers
+        close' = void (tryIO sendBye) `finally` TLS.contextClose ctx
+        -- warp bounds what 'connClose' sends through 'connSendGiveUp'.
+        sendBye = do
+            giveUp <- readTVarIO $ connSendGiveUp cc
+            -- It's fine if the connection was closed by the other side before
+            -- receiving close_notify, see RFC 5246 section 7.2.1.
+            handleJust
+                (\e -> guard (e == ConnectionClosedByPeer) >> return e)
+                (const (return ()))
+                (TLS.byeWith ctx $ giveUp <|> timedOutSTM (connWatchdog cc))
+#else
 #if MIN_VERSION_warp(3,5,0)
 httpOverTls TLSSettings{..} set cc s bs0 params =
 #else
@@ -632,7 +790,8 @@ httpOverTls TLSSettings{..} set s bs0 params =
             )
             throwIO
 
-#if MIN_VERSION_warp(3,5,0) && MIN_VERSION_tls(2,6,0)
+#endif
+#if MIN_VERSION_warp(3,5,0) && MIN_VERSION_tls(2,6,0) && !MIN_VERSION_tls(2,6,4)
 -- | A 'TLS.Backend' whose receive can also be given up on.
 data GivingUpBackend = GivingUpBackend TLS.Backend TLS.RecvWith
 
