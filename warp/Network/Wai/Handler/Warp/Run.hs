@@ -209,7 +209,46 @@ makeWatchedRecv sock pool ss cc = do
         giveUp
         (E.throwIO RecvGivenUp)
 
-data GiveUp = ShuttingDown | TimedOut
+-- | Why a receive on a connection gave up.
+--
+-- @since 3.5.0
+data GiveUp
+    = -- | The server is shutting down, or 'connRecvGiveUp' fired: the
+      --   end of input, as the peer's EOF is.
+      ShuttingDown
+    | -- | The watchdog timed the connection out.
+      TimedOut
+
+-- | What a receive on this connection gives up on, as 'makeWatchedRecv'
+--   does, for a connection which receives through something else: TLS's
+--   @recvDataWith@, say.  It is taken anew for each receive, as
+--   'connRecvGiveUp' changes.
+--
+-- @since 3.5.0
+watchedGiveUp :: ServerState -> ConnContext -> IO (STM GiveUp)
+watchedGiveUp ss cc = do
+    giveUp <- readTVarIO $ connRecvGiveUp cc
+    return $
+        gracefulGiveUp
+            ss
+            (connAppsInProgress cc)
+            (timedOutSTM $ connWatchdog cc)
+            (readTVar (connHandedOver cc) >>= check . not)
+            giveUp
+
+gracefulGiveUp
+    :: ServerState -> TVar Int -> STM () -> STM () -> STM () -> STM GiveUp
+gracefulGiveUp ss appsInProgress timedOut notHandedOver giveUp =
+    -- when shutting down or told to give up
+    ((checkShutdown <|> giveUp) $> ShuttingDown)
+        <|>
+        -- when the watchdog gave up on this connection
+        (timedOut $> TimedOut)
+  where
+    checkShutdown = do
+        notHandedOver
+        check =<< currentShuttingDownStateSTM ss
+        check . (<= 0) =<< readTVar appsInProgress
 
 makeGracefulRecvWith
     :: Socket
@@ -223,21 +262,11 @@ makeGracefulRecvWith
     -- ^ What a receive given up on answers
     -> Recv
 makeGracefulRecvWith sock pool ss appsInProgress timedOut notHandedOver giveUp givenUp = do
-    r <- receiveWith sock pool $
-        -- when shutting down or told to give up
-        ((checkShutdown <|> giveUp) $> ShuttingDown)
-        <|>
-        -- when the watchdog gave up on this connection
-        (timedOut $> TimedOut)
+    r <- receiveWith sock pool $ gracefulGiveUp ss appsInProgress timedOut notHandedOver giveUp
     case r of
         Left ShuttingDown -> givenUp
         Left TimedOut -> E.throwIO T.TimeoutThread
         Right bs -> return bs
-  where
-    checkShutdown = do
-        notHandedOver
-        check =<< currentShuttingDownStateSTM ss
-        check . (<= 0) =<< readTVar appsInProgress
 
 -- | Run an 'Application' on the given port.
 -- This calls 'runSettings' with 'defaultSettings'.

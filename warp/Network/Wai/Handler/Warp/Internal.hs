@@ -50,6 +50,8 @@ module Network.Wai.Handler.Warp.Internal (
     Recv,
     makeGracefulRecv,
     makeWatchedRecv,
+    watchedGiveUp,
+    GiveUp (..),
     RecvBuf,
 
     -- ** Buffer
