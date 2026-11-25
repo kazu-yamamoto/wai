@@ -517,7 +517,11 @@ httpOverTls TLSSettings{..} set cc s bs0 params =
                 if tm <= 0
                     then closer s
                     else gracefulCloser s tm `E.catch` throughAsync (return ())
-            , TLS.backendSend = \bs -> void $ sendWith' bs (retry :: STM ())
+            , -- tls sends through this what a receive provokes (a KeyUpdate
+              -- answer, an alert), with no give-up of its own.
+              TLS.backendSend = \bs -> do
+                giveUp <- readTVarIO $ connSendGiveUp cc
+                sendWith' bs giveUp >>= either (\_ -> throwIO TimeoutThread) return
             , TLS.backendRecv = \n -> either (const S.empty) id <$> recvNWith leftover n (retry :: STM ())
             }
     gracefulCloser
