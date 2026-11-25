@@ -7,7 +7,7 @@ module Network.Wai.Handler.WarpQUIC where
 import Control.Concurrent (forkIO, myThreadId)
 import GHC.Conc (labelThread)
 import Control.Concurrent.STM
-import Control.Monad (void)
+import Control.Monad (unless, void)
 import qualified Data.ByteString as BS
 import qualified Network.HQ.Server as HQ
 import qualified Network.HTTP3.Server as H3
@@ -34,7 +34,7 @@ runQUICSockets :: QUICSettings -> Settings -> [Socket] -> Application -> IO ()
 runQUICSockets quicsettings settings ss app =
     ( do
         drn <- newDraining
-        withII settings $ \ii ->
+        endedWith drn $ withII settings $ \ii ->
             Q.runWithSockets ss (stoppableBy settings drn quicsettings) $
                 quicApp settings drn app ii
     )
@@ -44,7 +44,7 @@ runQUICSockets quicsettings settings ss app =
 runQUIC :: QUICSettings -> Settings -> Application -> IO ()
 runQUIC quicsettings settings app = do
     drn <- newDraining
-    withII settings $ \ii ->
+    endedWith drn $ withII settings $ \ii ->
         Q.run (stoppableBy settings drn quicsettings) $ quicApp settings drn app ii
 
 -- | Whether the server is stopping, and how many HTTP/3 connections are
@@ -52,10 +52,16 @@ runQUIC quicsettings settings app = do
 data Draining = Draining
     { drainingVar :: TVar Bool
     , activeVar :: TVar Int
+    , endedVar :: TVar Bool
+    -- ^ The server has ended, by its stop or otherwise.
     }
 
 newDraining :: IO Draining
-newDraining = Draining <$> newTVarIO False <*> newTVarIO 0
+newDraining = Draining <$> newTVarIO False <*> newTVarIO 0 <*> newTVarIO False
+
+-- | Running the server, telling the draining thread when it has ended.
+endedWith :: Draining -> IO a -> IO a
+endedWith drn server = server `E.finally` atomically (writeTVar (endedVar drn) True)
 
 -- | Handing the action that stops the QUIC server to whoever installs
 --   shutdown handlers for this warp.
@@ -76,7 +82,7 @@ newDraining = Draining <$> newTVarIO False <*> newTVarIO 0
 -- which may be stopping other servers too, is not held up.
 stoppableBy :: Settings -> Draining -> QUICSettings -> QUICSettings
 #if MIN_VERSION_quic(0,3,15)
-stoppableBy settings (Draining draining active) quicsettings =
+stoppableBy settings (Draining draining active ended) quicsettings =
     quicsettings
         { Q.scInstallShutdownHandler = settingsInstallShutdownHandler settings . drainThen
         , Q.scCloseReason = (h3NoError, "server is closing")
@@ -91,9 +97,13 @@ stoppableBy settings (Draining draining active) quicsettings =
             late <- case settingsGracefulShutdownTimeout settings of
                 Nothing -> newTVarIO False
                 Just sec -> registerDelay $ toMicros sec
-            atomically $
-                (readTVar active >>= check . (== 0)) `orElse` (readTVar late >>= check)
-            stopServer
+            -- A server ended some other way has nothing left to stop.
+            gone <-
+                atomically $
+                    (False <$ (readTVar active >>= check . (== 0)))
+                        `orElse` (False <$ (readTVar late >>= check))
+                        `orElse` (True <$ (readTVar ended >>= check))
+            unless gone stopServer
 
 -- | Seconds in microseconds, kept from overflowing on 32 bits.
 toMicros :: Int -> Int
