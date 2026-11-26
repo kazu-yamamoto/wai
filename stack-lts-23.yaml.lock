@@ -147,26 +147,26 @@ packages:
     commit: 35c5f5d423b75a2ee9f8f9b8a40f16c6e55a7433
     git: https://github.com/kazu-yamamoto/http2
 - completed:
-    commit: 398513a5d67f91167bba98ca51497e58e31d4c77
+    commit: bc35678c545a1bb25b3b189f5f798d62c92fbcd7
     git: https://github.com/kazu-yamamoto/quic
     name: quic
     pantry-tree:
-      sha256: 5b84ae83a7786b807492f3c5e37ed8b48e273df18bc780113673ac76387d686f
+      sha256: 7359bef26473e66a1263dd27aa27ece55b925d6eca79e8cc5bf6a9c37deb4096
       size: 8779
     version: 0.3.24
   original:
-    commit: 398513a5d67f91167bba98ca51497e58e31d4c77
+    commit: bc35678c545a1bb25b3b189f5f798d62c92fbcd7
     git: https://github.com/kazu-yamamoto/quic
 - completed:
-    commit: 23b5113c6f5ab503abf89ddf277015d703502285
+    commit: 66ec513f33f86f38df32bb8891941e32c4014d94
     git: https://github.com/kazu-yamamoto/http3
     name: http3
     pantry-tree:
-      sha256: 579c81bae57f43b255cc6106dcdfd08c88e8a538a3431364eff1e7eda4768e25
+      sha256: cd36dd12653dc303ec72a76213a0d7fddb4e85f7484fd7e9373301424702377d
       size: 53702
     version: 0.1.12
   original:
-    commit: 23b5113c6f5ab503abf89ddf277015d703502285
+    commit: 66ec513f33f86f38df32bb8891941e32c4014d94
     git: https://github.com/kazu-yamamoto/http3
 - completed:
     hackage: mlkem-0.2.2.0@sha256:c16cb61190e915593767e716dd08957607f6045a01d7c3a1313fbd74eb31c75d,4759
