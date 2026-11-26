@@ -24,7 +24,7 @@ nix:
     - zlib
 extra-deps:
   - git: https://github.com/haskell-tls/hs-tls
-    commit: f7801eb9a1ef8af26e08773279e1fde2e7497938
+    commit: 0539aab7167af11aa8dbc47976659f7385cdf929
     subdirs:
       - tls
       - tls-session-manager

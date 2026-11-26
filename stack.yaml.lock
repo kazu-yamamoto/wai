@@ -5,20 +5,20 @@
 
 packages:
 - completed:
-    commit: f7801eb9a1ef8af26e08773279e1fde2e7497938
+    commit: 0539aab7167af11aa8dbc47976659f7385cdf929
     git: https://github.com/haskell-tls/hs-tls
     name: tls
     pantry-tree:
-      sha256: ee5b1f90a8c1f79ae496e7431bf6a77cdefa356245b5bd973a96e56298861f09
+      sha256: af487bcf2827dbaeb53f3a5aa41f2aa5e7d28e9fa414e61f66da5f034dd7a015
       size: 7657
     subdir: tls
     version: 2.7.0
   original:
-    commit: f7801eb9a1ef8af26e08773279e1fde2e7497938
+    commit: 0539aab7167af11aa8dbc47976659f7385cdf929
     git: https://github.com/haskell-tls/hs-tls
     subdir: tls
 - completed:
-    commit: f7801eb9a1ef8af26e08773279e1fde2e7497938
+    commit: 0539aab7167af11aa8dbc47976659f7385cdf929
     git: https://github.com/haskell-tls/hs-tls
     name: tls-session-manager
     pantry-tree:
@@ -27,7 +27,7 @@ packages:
     subdir: tls-session-manager
     version: 0.1.4
   original:
-    commit: f7801eb9a1ef8af26e08773279e1fde2e7497938
+    commit: 0539aab7167af11aa8dbc47976659f7385cdf929
     git: https://github.com/haskell-tls/hs-tls
     subdir: tls-session-manager
 - completed:
