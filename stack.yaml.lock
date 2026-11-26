@@ -5,12 +5,31 @@
 
 packages:
 - completed:
-    hackage: tls-2.6.4@sha256:5d33623417b5cfbfe810bc2939e12bcd84320baae013624062b14bd71383c24b,6749
+    commit: f7801eb9a1ef8af26e08773279e1fde2e7497938
+    git: https://github.com/haskell-tls/hs-tls
+    name: tls
     pantry-tree:
-      sha256: 83566888c96bfde0b0689d182b1329d17fd45361f0297469b7e66e0e7176250b
-      size: 7314
+      sha256: ee5b1f90a8c1f79ae496e7431bf6a77cdefa356245b5bd973a96e56298861f09
+      size: 7657
+    subdir: tls
+    version: 2.7.0
   original:
-    hackage: tls-2.6.4
+    commit: f7801eb9a1ef8af26e08773279e1fde2e7497938
+    git: https://github.com/haskell-tls/hs-tls
+    subdir: tls
+- completed:
+    commit: f7801eb9a1ef8af26e08773279e1fde2e7497938
+    git: https://github.com/haskell-tls/hs-tls
+    name: tls-session-manager
+    pantry-tree:
+      sha256: 38ae6f50f1a26a2062c02de2f91dab7fcda9b6162f07f4c6ec77b1006766d7c6
+      size: 613
+    subdir: tls-session-manager
+    version: 0.1.4
+  original:
+    commit: f7801eb9a1ef8af26e08773279e1fde2e7497938
+    git: https://github.com/haskell-tls/hs-tls
+    subdir: tls-session-manager
 - completed:
     hackage: ech-config-0.0.2@sha256:5ed06dae7c7a342fc16a69804d2614e4dbe68da27d5ad79d5a7d024defa67e02,1323
     pantry-tree:
@@ -96,48 +115,51 @@ packages:
   original:
     hackage: hpke-0.4.0
 - completed:
-    commit: ee8038f7b4603f633f271b26b58328ae9382caa3
-    git: https://github.com/kazu-yamamoto/http-semantics
-    name: http-semantics
+    hackage: http-semantics-0.5.0@sha256:99fadac382dda31d18d00207ad35fac4bce23855162e92bb0ae60fad75ded67d,1550
     pantry-tree:
-      sha256: 16eb819526a0f0184d0d5259cf2600dcc2f8d45718671017381259bceb0f9042
-      size: 1310
-    version: 0.4.2
+      sha256: e1fc2069fac3d68feaa925c8bd1b12a45a8a2a839c0dc0d1f6253b9039dc555a
+      size: 1261
   original:
-    commit: ee8038f7b4603f633f271b26b58328ae9382caa3
-    git: https://github.com/kazu-yamamoto/http-semantics
+    hackage: http-semantics-0.5.0
 - completed:
-    commit: 5deaba332750943d2c03df06addabe13259e87c3
+    hackage: network-byte-order-0.1.10@sha256:d3fad360ad85b0ed468e66f0c1c791bae525afccff008d1820bc619e343972e8,706
+    pantry-tree:
+      sha256: 478d666e6f4ec120e0e9aa44642b7804c418ae5e3b1ed338bb7b3b774ee44f63
+      size: 275
+  original:
+    hackage: network-byte-order-0.1.10
+- completed:
+    commit: 35c5f5d423b75a2ee9f8f9b8a40f16c6e55a7433
     git: https://github.com/kazu-yamamoto/http2
     name: http2
     pantry-tree:
-      sha256: 16b4738badb54a8cfd440e23ea5346b8439dc33957fed39e95fc1b1ccb45bc97
+      sha256: 83785ca38792db6a88b13a86ca5579a002fb5e0142c898b8294c6a7585d74de2
       size: 52640
     version: 5.4.14
   original:
-    commit: 5deaba332750943d2c03df06addabe13259e87c3
+    commit: 35c5f5d423b75a2ee9f8f9b8a40f16c6e55a7433
     git: https://github.com/kazu-yamamoto/http2
 - completed:
-    commit: bea99beba74682b1612363886ee6fcde610dcff9
+    commit: 398513a5d67f91167bba98ca51497e58e31d4c77
     git: https://github.com/kazu-yamamoto/quic
     name: quic
     pantry-tree:
-      sha256: 8735007239aa00d51ed3de9f1b56bbc48d2a90551a8ca5eeda341688b8d60434
-      size: 8717
+      sha256: 5b84ae83a7786b807492f3c5e37ed8b48e273df18bc780113673ac76387d686f
+      size: 8779
     version: 0.3.24
   original:
-    commit: bea99beba74682b1612363886ee6fcde610dcff9
+    commit: 398513a5d67f91167bba98ca51497e58e31d4c77
     git: https://github.com/kazu-yamamoto/quic
 - completed:
-    commit: 2f057c3795f37fe5ee04677c57d85e0efcc50361
+    commit: 23b5113c6f5ab503abf89ddf277015d703502285
     git: https://github.com/kazu-yamamoto/http3
     name: http3
     pantry-tree:
-      sha256: f4006459f75b87f5aa1f9fa076ff17921d1b13710f0fa1a098be3e2408cfe236
+      sha256: 579c81bae57f43b255cc6106dcdfd08c88e8a538a3431364eff1e7eda4768e25
       size: 53702
     version: 0.1.12
   original:
-    commit: 2f057c3795f37fe5ee04677c57d85e0efcc50361
+    commit: 23b5113c6f5ab503abf89ddf277015d703502285
     git: https://github.com/kazu-yamamoto/http3
 - completed:
     hackage: mlkem-0.2.2.0@sha256:c16cb61190e915593767e716dd08957607f6045a01d7c3a1313fbd74eb31c75d,4759
@@ -181,13 +203,6 @@ packages:
       size: 1594
   original:
     hackage: time-hourglass-0.3.0
-- completed:
-    hackage: tls-session-manager-0.1.2@sha256:5af13b0abe30de6e561c862987d2baa22820c79a36bfb4c17a7666308d6a01c7,1566
-    pantry-tree:
-      sha256: ba6b570f2cb143ba6a1982f293b3190bbd35fae00279f766257360feeafc8b7e
-      size: 613
-  original:
-    hackage: tls-session-manager-0.1.2@rev:1
 snapshots:
 - completed:
     sha256: 3286bb954fe0e7e0291ca61fac01a689b7165da9d7e8ba3c3a045be989c860fd

@@ -23,7 +23,11 @@ nix:
     - fcgi
     - zlib
 extra-deps:
-  - tls-2.6.4
+  - git: https://github.com/haskell-tls/hs-tls
+    commit: f7801eb9a1ef8af26e08773279e1fde2e7497938
+    subdirs:
+      - tls
+      - tls-session-manager
   - crypto-token-0.2.1
   - crypton-asn1-encoding-0.10.0
   - crypton-asn1-parse-0.10.0
@@ -37,23 +41,22 @@ extra-deps:
   - ech-config-0.0.2
   - fast-logger-3.2.8
   - hpke-0.4.0
-  # TEMPORARY: unreleased http-semantics, http2, quic and http3 from git.
+  # TEMPORARY: unreleased http2, quic, http3 and tls from git.
   # Revert to Hackage versions before merging.
-  - git: https://github.com/kazu-yamamoto/http-semantics
-    commit: ee8038f7b4603f633f271b26b58328ae9382caa3
+  - http-semantics-0.5.0
+  - network-byte-order-0.1.10
   - git: https://github.com/kazu-yamamoto/http2
-    commit: 5deaba332750943d2c03df06addabe13259e87c3
+    commit: 35c5f5d423b75a2ee9f8f9b8a40f16c6e55a7433
   - git: https://github.com/kazu-yamamoto/quic
-    commit: bea99beba74682b1612363886ee6fcde610dcff9
+    commit: 398513a5d67f91167bba98ca51497e58e31d4c77
   - git: https://github.com/kazu-yamamoto/http3
-    commit: 2f057c3795f37fe5ee04677c57d85e0efcc50361
+    commit: 23b5113c6f5ab503abf89ddf277015d703502285
   - mlkem-0.2.2.0
   - network-3.2.16.0
   - network-control-0.2.0
   - ram-0.22.0
   - sockaddr-0.0.1
   - time-hourglass-0.3.0
-  - tls-session-manager-0.1.2@rev:1
 allow-newer: true
 allow-newer-deps:
   - http2

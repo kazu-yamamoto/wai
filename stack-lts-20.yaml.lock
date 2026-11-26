@@ -82,26 +82,22 @@ packages:
   original:
     hackage: hpke-0.0.0
 - completed:
-    commit: ee8038f7b4603f633f271b26b58328ae9382caa3
-    git: https://github.com/kazu-yamamoto/http-semantics
-    name: http-semantics
+    hackage: http-semantics-0.5.0@sha256:99fadac382dda31d18d00207ad35fac4bce23855162e92bb0ae60fad75ded67d,1550
     pantry-tree:
-      sha256: 16eb819526a0f0184d0d5259cf2600dcc2f8d45718671017381259bceb0f9042
-      size: 1310
-    version: 0.4.2
+      sha256: e1fc2069fac3d68feaa925c8bd1b12a45a8a2a839c0dc0d1f6253b9039dc555a
+      size: 1261
   original:
-    commit: ee8038f7b4603f633f271b26b58328ae9382caa3
-    git: https://github.com/kazu-yamamoto/http-semantics
+    hackage: http-semantics-0.5.0
 - completed:
-    commit: 5deaba332750943d2c03df06addabe13259e87c3
+    commit: 35c5f5d423b75a2ee9f8f9b8a40f16c6e55a7433
     git: https://github.com/kazu-yamamoto/http2
     name: http2
     pantry-tree:
-      sha256: 16b4738badb54a8cfd440e23ea5346b8439dc33957fed39e95fc1b1ccb45bc97
+      sha256: 83785ca38792db6a88b13a86ca5579a002fb5e0142c898b8294c6a7585d74de2
       size: 52640
     version: 5.4.14
   original:
-    commit: 5deaba332750943d2c03df06addabe13259e87c3
+    commit: 35c5f5d423b75a2ee9f8f9b8a40f16c6e55a7433
     git: https://github.com/kazu-yamamoto/http2
 - completed:
     hackage: memory-0.18.0@sha256:9f4de967352f80b6f174c9a166f315393dde80b77d7b67e41268ae7dec0319f9,4581
@@ -139,12 +135,12 @@ packages:
   original:
     hackage: network-control-0.2.0
 - completed:
-    hackage: network-byte-order-0.1.7@sha256:3b6e875fe2f363817b157ecc9c45411ac84544bfa4a30364943e49e817db7fdf,664
+    hackage: network-byte-order-0.1.10@sha256:d3fad360ad85b0ed468e66f0c1c791bae525afccff008d1820bc619e343972e8,706
     pantry-tree:
-      sha256: 7aabe0549fd6b47377c17383806c1280f4b30bae09ad43d4889fea341a8779ad
-      size: 223
+      sha256: 478d666e6f4ec120e0e9aa44642b7804c418ae5e3b1ed338bb7b3b774ee44f63
+      size: 275
   original:
-    hackage: network-byte-order-0.1.7
+    hackage: network-byte-order-0.1.10
 - completed:
     hackage: os-string-2.0.8@sha256:d8b0f9cc3c7efb14c9924699322c8f151f30a65e8845bdf53bd344af47452344,3298
     pantry-tree:
