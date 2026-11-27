@@ -38,7 +38,7 @@ extra-deps:
   - http-semantics-0.5.0
   - network-byte-order-0.1.10
   - git: https://github.com/kazu-yamamoto/http2
-    commit: 35c5f5d423b75a2ee9f8f9b8a40f16c6e55a7433
+    commit: cd5e6fb31f22ec59eb382f962213af88b65f3fc0
   - mwc-random-0.15.2.0
   - network-3.2.16.0
   - network-control-0.2.0
