@@ -5,20 +5,20 @@
 
 packages:
 - completed:
-    commit: 4e0e6f9c69ca19cab3d1ec2e7bcc7a6d7fcd5d4c
+    commit: 3c3170891b4ae520b932273c670a3591b499830f
     git: https://github.com/haskell-tls/hs-tls
     name: tls
     pantry-tree:
-      sha256: 9e29f757fcf0dc54e481b9ec95d229520ceaecebd3accbb7368182eee46630cd
+      sha256: f7e0bbd79e972f68d58e666fcf1737ee5c604fb150697f00a13d06859f433601
       size: 7657
     subdir: tls
     version: 2.7.0
   original:
-    commit: 4e0e6f9c69ca19cab3d1ec2e7bcc7a6d7fcd5d4c
+    commit: 3c3170891b4ae520b932273c670a3591b499830f
     git: https://github.com/haskell-tls/hs-tls
     subdir: tls
 - completed:
-    commit: 4e0e6f9c69ca19cab3d1ec2e7bcc7a6d7fcd5d4c
+    commit: 3c3170891b4ae520b932273c670a3591b499830f
     git: https://github.com/haskell-tls/hs-tls
     name: tls-session-manager
     pantry-tree:
@@ -27,7 +27,7 @@ packages:
     subdir: tls-session-manager
     version: 0.1.4
   original:
-    commit: 4e0e6f9c69ca19cab3d1ec2e7bcc7a6d7fcd5d4c
+    commit: 3c3170891b4ae520b932273c670a3591b499830f
     git: https://github.com/haskell-tls/hs-tls
     subdir: tls-session-manager
 - completed:
@@ -158,15 +158,15 @@ packages:
     commit: 9025fbdd2dbb7baad65482e62250895dde695bf3
     git: https://github.com/kazu-yamamoto/quic
 - completed:
-    commit: eb64c7d4a6e979c92265b9103809391760c39629
+    commit: 45da4b1415229ad150c3d41686e4cf1a900b5de1
     git: https://github.com/kazu-yamamoto/http3
     name: http3
     pantry-tree:
-      sha256: 250462b804c7bcef551598c15fa433103cd7bf457f979abdc755e521b6a1ba28
+      sha256: f3be5a0f6a4cc6f84508c4d6446c5c6a40db4f387674ff2fd1e2c682ffcb686e
       size: 53702
     version: 0.1.12
   original:
-    commit: eb64c7d4a6e979c92265b9103809391760c39629
+    commit: 45da4b1415229ad150c3d41686e4cf1a900b5de1
     git: https://github.com/kazu-yamamoto/http3
 - completed:
     hackage: mlkem-0.2.2.0@sha256:c16cb61190e915593767e716dd08957607f6045a01d7c3a1313fbd74eb31c75d,4759
