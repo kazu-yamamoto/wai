@@ -5,20 +5,20 @@
 
 packages:
 - completed:
-    commit: 3c3170891b4ae520b932273c670a3591b499830f
+    commit: b1f84fa8d7255494592245027762e8bc6330125f
     git: https://github.com/haskell-tls/hs-tls
     name: tls
     pantry-tree:
-      sha256: f7e0bbd79e972f68d58e666fcf1737ee5c604fb150697f00a13d06859f433601
+      sha256: 7d395bede538c2dd1076c63332405f8995eeabcc382fc1b84b8ad11a6b5aea2a
       size: 7657
     subdir: tls
     version: 2.7.0
   original:
-    commit: 3c3170891b4ae520b932273c670a3591b499830f
+    commit: b1f84fa8d7255494592245027762e8bc6330125f
     git: https://github.com/haskell-tls/hs-tls
     subdir: tls
 - completed:
-    commit: 3c3170891b4ae520b932273c670a3591b499830f
+    commit: b1f84fa8d7255494592245027762e8bc6330125f
     git: https://github.com/haskell-tls/hs-tls
     name: tls-session-manager
     pantry-tree:
@@ -27,7 +27,7 @@ packages:
     subdir: tls-session-manager
     version: 0.1.4
   original:
-    commit: 3c3170891b4ae520b932273c670a3591b499830f
+    commit: b1f84fa8d7255494592245027762e8bc6330125f
     git: https://github.com/haskell-tls/hs-tls
     subdir: tls-session-manager
 - completed:
@@ -136,15 +136,15 @@ packages:
   original:
     hackage: network-byte-order-0.1.10
 - completed:
-    commit: 3348d7a12a4b03e8e188e6ab7ff5af9ca6a9e6ce
+    commit: c37c93eb976e2916054f5eb19711ac7be98edfbc
     git: https://github.com/kazu-yamamoto/http2
     name: http2
     pantry-tree:
-      sha256: 3171f6b81c1a31afbd4a26c6abdbbaa6c191b41c5fd1b113e958d0927455a3a7
+      sha256: 4f29eacd05034df706e1016f3b0e0a0b34a89492573c51a9adf0b2ef447d4904
       size: 52694
     version: 5.4.14
   original:
-    commit: 3348d7a12a4b03e8e188e6ab7ff5af9ca6a9e6ce
+    commit: c37c93eb976e2916054f5eb19711ac7be98edfbc
     git: https://github.com/kazu-yamamoto/http2
 - completed:
     commit: 3509cf9a00c0a95ac03618241f63b743a0a66a50
@@ -158,15 +158,15 @@ packages:
     commit: 3509cf9a00c0a95ac03618241f63b743a0a66a50
     git: https://github.com/kazu-yamamoto/quic
 - completed:
-    commit: 0279d8e60772c9791cfde6b097fb91fa98223aab
+    commit: 4bee4857e1311585555111df24981c117a31fceb
     git: https://github.com/kazu-yamamoto/http3
     name: http3
     pantry-tree:
-      sha256: 019562bdb6fce4d1ab4e7479a8fde1c9f6469fd45a4160b1433535e8be97e714
+      sha256: e6b3bb5b68fac3aabf411839b6b4885b8ccbaba42030ae3aa002088b554faea5
       size: 53702
     version: 0.1.12
   original:
-    commit: 0279d8e60772c9791cfde6b097fb91fa98223aab
+    commit: 4bee4857e1311585555111df24981c117a31fceb
     git: https://github.com/kazu-yamamoto/http3
 - completed:
     hackage: mlkem-0.2.2.0@sha256:c16cb61190e915593767e716dd08957607f6045a01d7c3a1313fbd74eb31c75d,4759

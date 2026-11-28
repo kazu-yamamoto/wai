@@ -61,15 +61,15 @@ packages:
   original:
     hackage: network-byte-order-0.1.10
 - completed:
-    commit: 3348d7a12a4b03e8e188e6ab7ff5af9ca6a9e6ce
+    commit: c37c93eb976e2916054f5eb19711ac7be98edfbc
     git: https://github.com/kazu-yamamoto/http2
     name: http2
     pantry-tree:
-      sha256: 3171f6b81c1a31afbd4a26c6abdbbaa6c191b41c5fd1b113e958d0927455a3a7
+      sha256: 4f29eacd05034df706e1016f3b0e0a0b34a89492573c51a9adf0b2ef447d4904
       size: 52694
     version: 5.4.14
   original:
-    commit: 3348d7a12a4b03e8e188e6ab7ff5af9ca6a9e6ce
+    commit: c37c93eb976e2916054f5eb19711ac7be98edfbc
     git: https://github.com/kazu-yamamoto/http2
 - completed:
     hackage: network-3.2.16.0@sha256:5e9b1f157014b90603dce772c9213114226886322f4a061423daa53cabb1eff3,5532

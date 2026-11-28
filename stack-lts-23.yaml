@@ -24,7 +24,7 @@ nix:
     - zlib
 extra-deps:
   - git: https://github.com/haskell-tls/hs-tls
-    commit: 3c3170891b4ae520b932273c670a3591b499830f
+    commit: b1f84fa8d7255494592245027762e8bc6330125f
     subdirs:
       - tls
       - tls-session-manager
@@ -46,11 +46,11 @@ extra-deps:
   - http-semantics-0.5.0
   - network-byte-order-0.1.10
   - git: https://github.com/kazu-yamamoto/http2
-    commit: 3348d7a12a4b03e8e188e6ab7ff5af9ca6a9e6ce
+    commit: c37c93eb976e2916054f5eb19711ac7be98edfbc
   - git: https://github.com/kazu-yamamoto/quic
     commit: 3509cf9a00c0a95ac03618241f63b743a0a66a50
   - git: https://github.com/kazu-yamamoto/http3
-    commit: 0279d8e60772c9791cfde6b097fb91fa98223aab
+    commit: 4bee4857e1311585555111df24981c117a31fceb
   - mlkem-0.2.2.0
   - network-3.2.16.0
   - network-control-0.2.0

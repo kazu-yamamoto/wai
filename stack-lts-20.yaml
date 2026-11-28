@@ -41,7 +41,7 @@ extra-deps:
   # Revert to Hackage versions before merging.
   - http-semantics-0.5.0
   - git: https://github.com/kazu-yamamoto/http2
-    commit: 3348d7a12a4b03e8e188e6ab7ff5af9ca6a9e6ce
+    commit: c37c93eb976e2916054f5eb19711ac7be98edfbc
   - memory-0.18.0
   - multipart-0.2.1
   - mwc-random-0.15.2.0
