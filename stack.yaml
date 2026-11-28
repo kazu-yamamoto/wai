@@ -45,11 +45,11 @@ extra-deps:
   - http-semantics-0.5.0
   - network-byte-order-0.1.10
   - git: https://github.com/kazu-yamamoto/http2
-    commit: cd5e6fb31f22ec59eb382f962213af88b65f3fc0
+    commit: 3348d7a12a4b03e8e188e6ab7ff5af9ca6a9e6ce
   - git: https://github.com/kazu-yamamoto/quic
-    commit: 9d553178ec8028b1c2637426ea345d084c580a43
+    commit: 3509cf9a00c0a95ac03618241f63b743a0a66a50
   - git: https://github.com/kazu-yamamoto/http3
-    commit: c4d540d44608f85fcef97d79bcd0c2c70bd80cb8
+    commit: 0279d8e60772c9791cfde6b097fb91fa98223aab
   - mlkem-0.2.2.0
   - network-3.2.16.0
   - network-control-0.2.0

@@ -129,37 +129,37 @@ packages:
   original:
     hackage: network-byte-order-0.1.10
 - completed:
-    commit: cd5e6fb31f22ec59eb382f962213af88b65f3fc0
+    commit: 3348d7a12a4b03e8e188e6ab7ff5af9ca6a9e6ce
     git: https://github.com/kazu-yamamoto/http2
     name: http2
     pantry-tree:
-      sha256: eaba693e158bdd14977e5d584d0ee4e2dd6f7d0d550884f3703e3a7a137de992
-      size: 52640
+      sha256: 3171f6b81c1a31afbd4a26c6abdbbaa6c191b41c5fd1b113e958d0927455a3a7
+      size: 52694
     version: 5.4.14
   original:
-    commit: cd5e6fb31f22ec59eb382f962213af88b65f3fc0
+    commit: 3348d7a12a4b03e8e188e6ab7ff5af9ca6a9e6ce
     git: https://github.com/kazu-yamamoto/http2
 - completed:
-    commit: 9d553178ec8028b1c2637426ea345d084c580a43
+    commit: 3509cf9a00c0a95ac03618241f63b743a0a66a50
     git: https://github.com/kazu-yamamoto/quic
     name: quic
     pantry-tree:
-      sha256: 0f17605d66dfb22ef100f79ed37db9e991ff75fe7bbf1fce75b3a7228e8d5632
-      size: 8779
+      sha256: 9c72f6e39aad8d2e36c8e47fe6137866d20414e7a074a39aca256f32fd69c0f1
+      size: 8617
     version: 0.3.24
   original:
-    commit: 9d553178ec8028b1c2637426ea345d084c580a43
+    commit: 3509cf9a00c0a95ac03618241f63b743a0a66a50
     git: https://github.com/kazu-yamamoto/quic
 - completed:
-    commit: c4d540d44608f85fcef97d79bcd0c2c70bd80cb8
+    commit: 0279d8e60772c9791cfde6b097fb91fa98223aab
     git: https://github.com/kazu-yamamoto/http3
     name: http3
     pantry-tree:
-      sha256: 6668224661b063742b070eee11c77cbbcd6318f45c2cf6be5dccd896886d1c56
+      sha256: 019562bdb6fce4d1ab4e7479a8fde1c9f6469fd45a4160b1433535e8be97e714
       size: 53702
     version: 0.1.12
   original:
-    commit: c4d540d44608f85fcef97d79bcd0c2c70bd80cb8
+    commit: 0279d8e60772c9791cfde6b097fb91fa98223aab
     git: https://github.com/kazu-yamamoto/http3
 - completed:
     hackage: mlkem-0.2.2.0@sha256:c16cb61190e915593767e716dd08957607f6045a01d7c3a1313fbd74eb31c75d,4759
