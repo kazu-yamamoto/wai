@@ -88,9 +88,10 @@ exercise hosts concurrent = S.withSocketsDo $
         port <- S.socketPort listener
         events <- newChan
         ready <- newEmptyMVar
-        let report address exception = case fromException exception of
-                Just tlsException -> writeChan events (address, show (tlsException :: TLS.WarpTLSException))
-                Nothing -> throwIO exception
+        let report address exception
+                | Just e <- fromException exception = writeChan events (address, show (e :: TLS.WarpTLSException))
+                | Just e <- fromException exception = writeChan events (address, show (e :: Warp.InvalidRequest))
+                | otherwise = throwIO exception
             settings = Warp.setBeforeMainLoop (putMVar ready ()) $ observePeer report Warp.defaultSettings
             application _ _ = fail "connection must fail before the application"
             tls = TLS.tlsSettings "certificate.pem" "key.pem"
@@ -106,7 +107,7 @@ exercise hosts concurrent = S.withSocketsDo $
                         -- an early close could cause a different send exception.
                         timeout 2000000 (drain client) `shouldReturn` Just ()
                     else S.shutdown client S.ShutdownSend
-                pure (Just own, if plaintext then "InsecureConnectionDenied" else "ClientClosedConnectionPrematurely")
+                pure (Just own, if plaintext then "InsecureConnectionDenied" else show Warp.ConnectionClosedByPeer)
         withAsync (TLS.runTLSSocket tls settings listener application) $ \server -> do
             link server
             timeout 2000000 (takeMVar ready) `shouldReturn` Just ()

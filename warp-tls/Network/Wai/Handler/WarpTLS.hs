@@ -445,7 +445,8 @@ mkConn tlsset set s params = do
         | ioeGetErrorType e == ResourceVanished = return $ Right ""
         | otherwise = E.throwIO (e :: E.IOException)
     switch firstBS
-        | S.null firstBS = unsafeClose s >> throwIO ClientClosedConnectionPrematurely
+        -- A probe which connects and closes: warp does not display this.
+        | S.null firstBS = unsafeClose s >> throwIO ConnectionClosedByPeer
 #if MIN_VERSION_warp(3,5,0)
         | S.head firstBS == 0x16 = httpOverTls tlsset set cc s firstBS params
         | otherwise = plainHTTP tlsset set cc s firstBS
@@ -461,6 +462,14 @@ isAsyncException e =
     case E.fromException (E.toException e) of
         Just (E.SomeAsyncException _) -> True
         Nothing -> False
+
+-- | A peer closing in the middle of the handshake is closing early, as
+--   one closing before it is, rather than a TLS failure to display.
+closedEarly :: IO a -> IO a
+closedEarly = handleJust eof (\_ -> throwIO ConnectionClosedByPeer)
+  where
+    eof (TLS.HandshakeFailed TLS.Error_EOF) = Just ()
+    eof _ = Nothing
 
 throughAsync :: IO a -> SomeException -> IO a
 throughAsync action (SomeException e)
@@ -499,7 +508,7 @@ httpOverTls TLSSettings{..} set cc s bs0 params =
         -- Given up on by the watchdog or the shutdown: a quiet end, as a
         -- first read ended by them is.
         let shuttingDown = currentShuttingDownStateSTM ss >>= check
-        TLS.handshakeWith ctx (timedOutSTM (connWatchdog cc) <|> shuttingDown)
+        closedEarly (TLS.handshakeWith ctx (timedOutSTM (connWatchdog cc) <|> shuttingDown))
             >>= either (\_ -> throwIO TimeoutThread) return
         TLS.getNegotiatedProtocol ctx >>= I.writeIORef h2 . (== Just "h2")
         mysa <- getSocketName s
@@ -683,11 +692,11 @@ httpOverTls TLSSettings{..} set s bs0 params =
 #if MIN_VERSION_warp(3,5,0)
             -- A handshake ended by the shutdown is a quiet end, as a first
             -- read ended by it is: tls reports it as a failed handshake.
-            TLS.handshake ctx `E.catch` \e -> do
+            closedEarly $ TLS.handshake ctx `E.catch` \e -> do
                 down <- atomically $ currentShuttingDownStateSTM ss
                 if down then throwIO TimeoutThread else throwIO (e :: TLS.TLSException)
 #else
-            TLS.handshake ctx
+            closedEarly $ TLS.handshake ctx
 #endif
             TLS.getNegotiatedProtocol ctx >>= I.writeIORef h2 . (== Just "h2")
             mysa <- getSocketName s
@@ -1014,6 +1023,7 @@ recvPlain ref fallback = do
 
 data WarpTLSException
     = InsecureConnectionDenied
-    | ClientClosedConnectionPrematurely
+    | -- | No longer thrown: warp's 'ConnectionClosedByPeer' is instead.
+      ClientClosedConnectionPrematurely
     deriving (Show)
 instance Exception WarpTLSException
