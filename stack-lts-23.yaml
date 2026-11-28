@@ -48,9 +48,9 @@ extra-deps:
   - git: https://github.com/kazu-yamamoto/http2
     commit: cd5e6fb31f22ec59eb382f962213af88b65f3fc0
   - git: https://github.com/kazu-yamamoto/quic
-    commit: 9025fbdd2dbb7baad65482e62250895dde695bf3
+    commit: 9d553178ec8028b1c2637426ea345d084c580a43
   - git: https://github.com/kazu-yamamoto/http3
-    commit: 45da4b1415229ad150c3d41686e4cf1a900b5de1
+    commit: c4d540d44608f85fcef97d79bcd0c2c70bd80cb8
   - mlkem-0.2.2.0
   - network-3.2.16.0
   - network-control-0.2.0
